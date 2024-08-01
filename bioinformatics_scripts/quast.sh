@@ -1,0 +1,103 @@
+#!/bin/bash
+#SBATCH --job-name=quast_%j
+#SBATCH --output=quast_%j.log
+#SBATCH --error=quast_%j.err
+#SBATCH --mem-per-cpu=100gb
+#SBATCH --time=4-00:00:00
+
+# If the module is already located on the HPC:
+module load quast
+
+# get the version printed to the log
+quast --version
+
+quast.py -o ./output/quast/prok_assemblies \
+    output/eukrep/prok_assembly/1004.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1220.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1280.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1332.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1340.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1452.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1455.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1463.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1470.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1552.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1557.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1655.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1656.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1688.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1703.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1724.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1741.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1742.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1743.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1745.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1748.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1749.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1752.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1753.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1777.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1778.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1796.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1801.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1810.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1813.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1814.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1819.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1822.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1825.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1922.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1923.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/1924.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2026.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2027.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2032.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2085.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2105.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2115.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2126.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2127.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2129.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2311.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2314.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2405.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2558.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2579.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2818.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2907.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/2964.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/3342.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/3343.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/3420.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/3421.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/3446.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/4360.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/4503.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/4616.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/617.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/663.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/675.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/679.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/689.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/693.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/695.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/699.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/713.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/719.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/741.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/753.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/765.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N46.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N48.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N50.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N52.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N53.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N54.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N56.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N58.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N59.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N60.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N67.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N70.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N72.prok.final.contigs.fa \
+    output/eukrep/prok_assembly/N73.prok.final.contigs.fa
