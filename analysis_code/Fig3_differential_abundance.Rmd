@@ -1,0 +1,28 @@
+---
+title: "DA_code_to_reproduce_Figure_3"
+author: "Cynthia Becker"
+date: "2024-08-01"
+output:
+  html_document:
+    keep_md: true
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    theme: united
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.retina = 2, fig.path = "../figures/fig-")
+setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
+```
+
+# Setup
+## Install necessary packages
+
+```{r packages, message=FALSE, warning=FALSE, results='hide'}
+# For data wrangling
+
+# For visualization
+
+```
+
