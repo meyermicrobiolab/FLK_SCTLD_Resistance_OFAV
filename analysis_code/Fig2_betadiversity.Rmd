@@ -179,6 +179,40 @@ ggarrange(pca_fate, betadisp_fate, labels = c("a.", "b."), common.legend = TRUE)
 # ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
 ```
 
+### PCA fate subset
+```{r}
+# subset the unaffected and diseased fates (no recovered or will be diseased)
+ps.count.filt_clr_subset <- subset_samples(ps.count.filt_clr, Fate_after_SP1 %in% c("Unaffected", "Diseased"))
+
+# Generate aitchison distance ordination (euclidean distance on clr-transformed data)
+ps.count.filt_clr_euc_subset <- ordinate(ps.count.filt_clr_subset, "RDA", "euclidean")
+
+# Generate aitchison distance dissimilarity matrix with vegan for adonis2 test
+count.clr_meta_subset <- as(sample_data(ps.count.filt_clr_subset), "data.frame")
+count.clr_otu_subset <- otu_table(ps.count.filt_clr_subset) %>% as.matrix %>% t() #samples must be rows, so transpose
+
+#get dissimilarity matrix 
+count.euc_diss_subset <- vegdist(count.clr_otu_subset, method = "euclidean")
+
+sample_data(ps.count.filt_clr_subset)$Fate_after_SP1 <- 
+              factor(sample_data(ps.count.filt_clr_subset)$Fate_after_SP1, 
+                                 levels = c("Unaffected", "Diseased"))
+
+# plot PCA - facet by fate
+pca_fate <- plot_ordination(ps.count.filt_clr_subset, ps.count.filt_clr_euc_subset, type="samples", 
+                color="Fate_after_SP1") +
+  geom_point(size = 4) +
+  coord_fixed() +
+  scale_color_manual(values = c("#648FFF", "#DC267F")) +
+  labs(color = "Colony Fate")
+pca_fate
+
+# Conduct statistical tests on Fate 
+# Use the dissimilarity matrix from where you read in the ps object
+set.seed(10)
+adonis2(formula = count.euc_diss_subset ~ Fate_after_SP1, data = count.clr_meta_subset, permutations = 999) 
+```
+
 ## Symbiodiniaceae background
 ### PCA symbiont
 ```{r}
