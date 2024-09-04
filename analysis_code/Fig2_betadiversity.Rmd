@@ -217,6 +217,7 @@ adonis2(formula = count.euc_diss_subset ~ Fate_after_SP1, data = count.clr_meta_
 ### PCA symbiont
 ```{r}
 sample_data(ps.count.filt_clr)$Zoox_background <- factor(sample_data(ps.count.filt_clr)$Zoox_background, levels = c("none", "C", "CD", "D"))
+sample_data(ps.count.filt_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.count.filt_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
 
 # plot PCA with labels to see which corals are farther apart
 plot_ordination(ps.count.filt_clr, ps.count.filt_clr_euc, type="samples", 
@@ -237,7 +238,7 @@ symbiont_pca$layers
 symbiont_pca$layers <- symbiont_pca$layers[-1]
 
 symbiont_pca_final <- symbiont_pca + geom_point(size=4, alpha=0.8)
-
+symbiont_pca_final
 
 # Conduct statistical tests on the background symbiont
 # Use the dissimilarity matrix from an earlier chunk
@@ -260,6 +261,8 @@ disp.symbiont.meta <- cbind(distances, count.clr_meta)
 
 # Set the levels so the graphs match
 disp.symbiont.meta$Zoox_background <- factor(disp.symbiont.meta$Zoox_background, levels = c("none", "C", "CD", "D"))
+disp.symbiont.meta$Disease_on_colony_when_coring_binary <-
+  factor(disp.symbiont.meta$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
 
 # Are the data normally distributed in each group?
 ggqqplot(disp.symbiont.meta$distances) # not normal looking
@@ -282,7 +285,7 @@ betadisp_symbiont <- ggplot(disp.symbiont.meta, aes(x = Zoox_background, y = dis
   ylab("Distance to Centroid") +
   theme(legend.text.align = 0) +
   #scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Background Symbiodiniaceae", x = "Background Symbiodiniaceae")
+  labs(color = "Background Symbiodiniaceae", x = "Background Symbiodiniaceae", shape = "Disease at sampling")
 
 betadisp_symbiont
 ```
@@ -346,12 +349,17 @@ adonis2(formula = count.euc_diss ~ Location, data = count.clr_meta, permutations
 ## Disease at sampling
 ### PCA disease at sampling
 ```{r}
+sample_data(ps.count.filt_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.count.filt_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
+
 # plot PCA
 disease_pca <- plot_ordination(ps.count.filt_clr, ps.count.filt_clr_euc, type="samples", 
-                color="Disease_on_colony_when_coring_binary") +
+                color="Disease_on_colony_when_coring_binary", 
+                shape ="Disease_on_colony_when_coring_binary") +
   geom_point(size = 4) +
   coord_fixed() +
-  labs(color = "Disease at sampling")
+  labs(color = "Disease at sampling", shape = "Disease at sampling") +
+  scale_color_manual(values = c("#0C7BDC", "#FFC20A"))
+disease_pca
 
 # Conduct statistical tests on the clones 
 # Use the dissimilarity matrix from an earlier chunk
@@ -383,18 +391,25 @@ kruskal.test(distances ~ Disease_on_colony_when_coring_binary, data = disp.disea
 wilcox.test(distances ~ Disease_on_colony_when_coring_binary, 
             data = disp.disease.meta) 
 
+# Set levels
+disp.disease.meta$Disease_on_colony_when_coring_binary <- factor(disp.disease.meta$Disease_on_colony_when_coring_binary, 
+                                                                 levels = c("Unaffected", "Diseased"))
+
 # Plot the results
 betadisp_disease <- ggplot(disp.disease.meta, aes(x = Disease_on_colony_when_coring_binary, 
                                                   y = distances)) +
   geom_boxplot(lwd = 0.5, outlier.shape = NA) +
   stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
   geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Disease_on_colony_when_coring_binary), 
+              aes(color = Disease_on_colony_when_coring_binary, 
+                  shape = Disease_on_colony_when_coring_binary), 
               size = 4, alpha = 0.8) +
   ylab("Distance to Centroid") +
   theme(legend.text.align = 0) +
   #scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Background Symbiodiniaceae", x = "Background Symbiodiniaceae")
+  labs(color = "Background Symbiodiniaceae", x = "Disease at sampling", shape = "Disease at sampling") +
+  scale_color_manual(values = c("#0C7BDC", "#FFC20A"))
+
 
 betadisp_disease
 ```
@@ -403,4 +418,14 @@ betadisp_disease
 ```{r}
 ggarrange(disease_pca, betadisp_disease, labels = c("a.", "b."), common.legend = TRUE)
 # ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
+```
+
+## Figure - disease at sampling and symbiodiniaceae
+```{r}
+ggarrange(ggarrange(disease_pca, betadisp_disease, 
+                    labels = c("a.", "b."), common.legend = TRUE), 
+          ggarrange(symbiont_pca_final, betadisp_symbiont, 
+                    labels = c("c.", "d."), common.legend = TRUE, legend = "bottom"), 
+          nrow = 2)
+ggsave("../figures/PCA_disease_symbiont.pdf", width = 8, height = 8)
 ```
