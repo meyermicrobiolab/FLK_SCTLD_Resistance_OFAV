@@ -176,7 +176,7 @@ betadisp_fate
 ### Supp. Figure - Fate
 ```{r}
 ggarrange(pca_fate, betadisp_fate, labels = c("a.", "b."), common.legend = TRUE)
-# ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
+ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
 ```
 
 ### PCA fate subset

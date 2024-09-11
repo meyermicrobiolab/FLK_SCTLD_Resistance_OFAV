@@ -21,8 +21,555 @@ setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
 
 ```{r packages, message=FALSE, warning=FALSE, results='hide'}
 # For data wrangling
+library(dplyr)
+library(readxl)
+library(tidyr)
 
 # For visualization
-
+library(ggplot2)
 ```
 
+# Load data
+
+## metabolic data
+```{r}
+# Load METABOLIC functional information
+HMM_hits <- read_excel("../data/FLK_coassembly_METABOLIC_result.xlsx", sheet = "HMMHitNum")
+fxns_hits <- read_excel("../data/FLK_coassembly_METABOLIC_result.xlsx", sheet = "FunctionHit")
+KEGG_hits <- read_excel("../data/FLK_coassembly_METABOLIC_result.xlsx", sheet = "KEGGModuleHit")
+KEGG_step_hits <- read_excel("../data/FLK_coassembly_METABOLIC_result.xlsx", sheet = "KEGGModuleStepHit")
+
+# Load table with count abundances from salmon ("numreads")
+numreads <- read.table("../data/FLK_coassembly_salmon_quant_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
+numreads <- numreads[, -1] # get rid of the first column cause it is just numbered lines
+
+# Load the table with taoxnomic information from mmseqs2
+taxa <- read.table("../data/FLK_coassembly_tax_mmseqs2_lca.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
+
+# Load the table with functional information from eggnog mapper
+fxn <- read_excel("../data/FLK_coassembly_fxn_eggnog.xlsx", skip = 2, na = "-")
+
+# Load metadata
+metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
+rownames(metadata) <- metadata$CoralID
+```
+
+## Count phyloseq object that is centered log-ratio transformation.
+
+Create a phyloseq object with the count data. Remove any genes with zero abundances. Also make a phyloseq object with only the annotated genes. 
+```{r}
+# remove contigs with zero abundacne
+numreads_nozero <- numreads[rowSums(numreads) != 0, ]
+dim(numreads_nozero)
+
+# any samples with no reads?
+table(colSums(numreads_nozero) == 0)
+
+# Fix the sample names
+colnames(numreads_nozero) <- str_replace_all(colnames(numreads_nozero), pattern = "[X]", "")
+colnames(numreads_nozero) <- str_split_i(colnames(numreads_nozero), "[_]", 1)
+```
+
+## phyloseq object - count data
+```{r}
+idx <- match(colnames(numreads_nozero), rownames(metadata))
+metadata_3 <- metadata[idx,]
+
+NUMREADS = otu_table(numreads_nozero, taxa_are_rows = TRUE)
+META = sample_data(metadata_3)
+
+ps.count <- phyloseq(NUMREADS, META)
+ps.count
+```
+
+## clr-transf phyloseq object
+
+I need to do a centered log-ratio transformation, which addresses the compositional nature of the data before I compare between groups.
+```{r}
+ps.count_clr <- microbiome::transform(ps.count, 'clr')
+ps.count_clr
+```
+
+## Nitrogen
+
+I am interested in analyzing which nitrogen cycling genes change with Fate.
+
+### Organize data
+Get the data organized into a form for graphing and statistical analyses. 
+```{r}
+n_hits <- fxns_hits %>%
+  filter(Category == "Nitrogen cycling") %>%
+  filter(FLK_OFAV_MG_pred.Function.presence == "Present")
+
+n_hits
+
+n_contig_hits <- HMM_hits %>%
+  filter(Category == "Nitrogen cycling") %>%
+  filter(FLK_OFAV_MG_pred.Hmm.presence == "Present") %>%
+  mutate(FLK_OFAV_MG_pred.Hits = str_split(FLK_OFAV_MG_pred.Hits, ",")) %>%
+  unnest_wider(FLK_OFAV_MG_pred.Hits, names_sep = "_") %>%
+  gather(key = "arbitrary_hit_number", value = "contig", FLK_OFAV_MG_pred.Hits_1:FLK_OFAV_MG_pred.Hits_14) %>%
+  filter(!is.na(contig))
+
+# Which contigs contain nitrogen cycling genes?
+n_contig_hits$contig
+
+n_cycling_contigs <- n_contig_hits$contig
+
+# make a ps object with only those n cycling contigs
+ps.count.clr_n_cycle <- prune_taxa(n_cycling_contigs, ps.count_clr)
+
+n_cycle_forgraph_clr <- as.data.frame(otu_table(ps.count.clr_n_cycle)) %>%
+  mutate(contig = rownames(.)) %>%
+  left_join(n_contig_hits, by = "contig", relationship = "many-to-many") %>% # need to set many to many because the k127_62437_2 contig has two annotations
+  gather(key = "CoralID", value = "clr", 1:41) %>% 
+  left_join(metadata, by = "CoralID") %>%   # add the metadata
+  left_join(taxa, by = "contig") %>% # add the taxonomy
+  mutate(Fate_after_SP1 = factor(Fate_after_SP1, 
+                                 levels = c("Recovered", "Unaffected", 
+                                            "Will be diseased", "Diseased"))) %>%
+  mutate(Disease_on_colony_when_coring_binary = factor(Disease_on_colony_when_coring_binary, 
+                                 levels = c("Unaffected", "Diseased")))
+
+n_cycle_forgraph_clr
+```
+
+### Wilcox test
+Now do the statistical test on the group, by disease at sampling (Disease_on_colony_when_coring_binary). I will run a wilcoxon test, then graph with all the genes. 
+```{r}
+# Get data for one contig each, getting rid of the duplicate contigs
+n_cycle_clr_forstat <- as.data.frame(otu_table(ps.count.clr_n_cycle)) %>%
+  mutate(contig = rownames(.)) %>%
+  gather(key = "CoralID", value = "clr", 1:41) %>% 
+  left_join(metadata, by = "CoralID") %>%   # add the metadata
+  left_join(taxa, by = "contig") %>% # add the taxonomy
+  mutate(Disease_on_colony_when_coring_binary = factor(Disease_on_colony_when_coring_binary, 
+                                 levels = c("Unaffected", "Diseased")))
+
+summary(plyr::count(n_cycle_clr_forstat$contig)$freq) # verify you have the same number of samples for each contig - Works!
+
+set.seed(100)
+
+# perform wilcoxon test for each contig between the subset fate categories
+wilcoxon_results_Fate <- n_cycle_clr_forstat %>% 
+  group_by(contig) %>%
+  dplyr::summarize(
+    p_value = wilcox.test(clr ~ Disease_on_colony_when_coring_binary)$p.value,
+    statistic = wilcox.test(clr ~ Disease_on_colony_when_coring_binary)$statistic,
+    method = wilcox.test(clr ~ Disease_on_colony_when_coring_binary)$method
+  )
+
+# which genes are significantly different?
+results0.05_N <- dplyr::filter(wilcoxon_results_Fate, p_value < 0.05) %>%
+  left_join(n_contig_hits, by = "contig")
+results0.05_N 
+
+results0.01_N <- dplyr::filter(wilcoxon_results_Fate, p_value < 0.01) %>%
+  left_join(n_contig_hits, by = "contig")
+results0.01_N
+
+# Try a bonferroni correction -  tests 54
+ntests_N <- n_cycle_clr_forstat$contig %>% unique %>% length
+
+N_resultsBC <- dplyr::filter(wilcoxon_results_Fate, p_value < 0.05/ntests_N) %>%
+  left_join(n_contig_hits, by = "contig")
+N_resultsBC
+```
+
+### Main figure
+Make a graph of the results at the 0.01 level. 
+```{r}
+safe_colorblind_palette <- c("#000000", "#88CCEE", "#CC6677", "#DDCC77", "#117733", "#332288", "#AA4499", 
+                             "#44AA99", "#999933", "#882255", "#661100", "#6699CC", "#888888")
+
+palette_for_mags <- c("#B3E2CD", "#FDCDAC", "#CBD5E8", "#F4CAE4", "#E6F5C9", "#FFF2AE", "#F1E2CC", "#CCCCCC")
+
+n_cycle_forgraph_clr_sig01 <- n_cycle_forgraph_clr %>%
+  filter(contig %in% results0.01_N$contig)
+
+ggplot(n_cycle_forgraph_clr_sig01, aes(x = Disease_on_colony_when_coring_binary, y = clr)) +
+  geom_boxplot(lwd = 1, outlier.shape = NA) +
+  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
+  geom_jitter(position = position_jitter(width = .1, height = 0), 
+              aes(color = complete_classification, shape = Disease_on_colony_when_coring_binary), size = 4) +
+  ylab("clr-transformed abundance") +
+  facet_wrap(. ~ Function + contig, scales = "free_y", ncol = 7) +
+  theme(axis.text.x = element_text(angle = 45, hjust= 1, vjust = 1)) +
+  scale_color_manual(values = c("#000000", "#882255","#AA4499", "#999933", "#DDCC77", "#117733", "#332288", "#6699CC", "#44AA99", "#88CCEE",  "#CC6677", "#661100","#888888")) +
+  labs(shape = "Disease at sampling", color = "Taxonomic annotation of contig", x = "Fate after sampling")
+
+#ggsave("../figures/box_whisker_N_cycling_fate.pdf", width = 22, height = 3)
+
+ggplot(n_cycle_forgraph_clr_sig01, aes(x = Disease_on_colony_when_coring_binary, y = clr)) +
+  geom_boxplot(lwd = 1, outlier.shape = NA) +
+  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
+  geom_jitter(position = position_jitter(width = .1, height = 0), 
+              aes(color = complete_classification, shape = Disease_on_colony_when_coring_binary), size = 4) +
+  ylab("clr-transformed abundance") +
+  facet_wrap(. ~ Function + contig, scales = "free_y", ncol = 7) +
+  theme(axis.text.x = element_text(angle = 45, hjust= 1, vjust = 1)) +
+  scale_color_manual(values = c("#000000", "#882255","#AA4499", "#999933", "#DDCC77", "#117733", "#332288", "#6699CC", "#44AA99", "#88CCEE",  "#CC6677", "#661100","#888888")) +
+  labs(shape = "Disease at sampling", color = "Taxonomic annotation of contig", x = "Fate after sampling") +
+  theme(legend.position = "none")
+```
+
+## Sulfur
+
+### Organize data
+```{r}
+s_hits <- fxns_hits %>%
+  filter(Category == "Sulfur cycling") %>%
+  filter(FLK_OFAV_MG_pred.Function.presence == "Present")
+
+s_hits
+
+s_contig_hits_summary <- HMM_hits %>%
+  filter(Category %in% c("Sulfur cycling", "Sulfur cycling enzymes (detailed)")) %>%
+  filter(FLK_OFAV_MG_pred.Hmm.presence == "Present")
+
+s_contig_hits_summary
+
+s_contig_hits_summary %>% 
+  dplyr::select(Gene.abbreviation, Gene.name) %>%
+  mutate(combo = paste0(Gene.abbreviation, " = ", Gene.name)) %>%
+  dplyr::select(combo) %>%
+  unique %>%
+  as.data.frame
+
+# I also found some DMSP degrading activity in the eggnog results, cause there werent any in the metabolic database
+s_eggnog_hits_DMSP <- fxn %>% 
+  filter(Description %in% c("Mediates cleavage of dimethlysulfonioproprionate (DMSP) into dimethyl sulfide (DMS) and acrylate. DMS is the principal form by which sulfur is transported from oceans to the atmosphere and is a key component of the ocean sulfur cycle", "Dimethlysulfonioproprionate lyase")) %>%
+  left_join(taxa, by = c("query" = "contig"))
+
+s_eggnog_hits_DMSP
+
+s_contig_hits <- HMM_hits %>%
+  filter(Category %in% c("Sulfur cycling", "Sulfur cycling enzymes (detailed)")) %>%
+  filter(FLK_OFAV_MG_pred.Hmm.presence == "Present") %>%
+  mutate(FLK_OFAV_MG_pred.Hits = str_split(FLK_OFAV_MG_pred.Hits, ",")) %>%
+  unnest_wider(FLK_OFAV_MG_pred.Hits, names_sep = "_") %>%
+  gather(key = "arbitrary_hit_number", value = "contig", FLK_OFAV_MG_pred.Hits_1:FLK_OFAV_MG_pred.Hits_50) %>%
+  filter(!is.na(contig))
+
+s_contig_hits
+
+# Which contigs contain sulfur cycling genes? Combine the eggnog sulfur contigs and the metabolic sulfur contigs
+s_contig_hits$contig
+s_eggnog_hits_DMSP$query
+
+s_cycling_contigs <- c(s_contig_hits$contig, s_eggnog_hits_DMSP$query)
+
+# make a ps object with only those n cycling contigs
+ps.count.clr_s_cycle <- prune_taxa(s_cycling_contigs, ps.count_clr)
+
+s_cycle_forgraph_clr <- as.data.frame(otu_table(ps.count.clr_s_cycle)) %>%
+  mutate(contig = rownames(.)) %>%
+  left_join(s_contig_hits, by = "contig", relationship = "many-to-many") %>% # need to set many to many because multiple contigs have multiple annotations
+  left_join(s_eggnog_hits_DMSP, by = c("contig" = "query")) %>%
+  gather(key = "CoralID", value = "clr", 1:41) %>% 
+  left_join(metadata, by = "CoralID") %>%   # add the metadata
+  left_join(taxa, by = "contig") %>% # add the taxonomy
+  mutate(Fate_after_SP1 = factor(Fate_after_SP1, 
+                                 levels = c("Recovered", "Unaffected", 
+                                            "Will be diseased", "Diseased"))) %>%
+  mutate(Disease_on_colony_when_coring_binary = factor(Disease_on_colony_when_coring_binary, 
+                                 levels = c("Unaffected", "Diseased")))
+
+s_cycle_forgraph_clr
+```
+
+### Wilcox test
+
+Wow, there are a lot of organosulfur protein genes as well as inorganic sulfur. Now do the statistical test on the group, by fate...So I need to subset the data by just the unaffected and diseased fates, run the wilcoxon test, then graph with all the genes. 
+```{r}
+s_cycle_clr_forstat <- as.data.frame(otu_table(ps.count.clr_s_cycle)) %>%
+  mutate(contig = rownames(.)) %>%
+  gather(key = "CoralID", value = "clr", 1:41) %>% 
+  left_join(metadata, by = "CoralID") %>%   # add the metadata
+  left_join(taxa, by = "contig") %>% # add the taxonomy
+  mutate(Disease_on_colony_when_coring_binary = factor(Disease_on_colony_when_coring_binary, 
+                                 levels = c("Unaffected", "Diseased")))
+
+summary(plyr::count(s_cycle_clr_forstat$contig)$freq) # verify you have the same number of samples for each contig
+
+set.seed(100)
+
+# perform wilcoxon test for each contig between the subset fate categories
+S_wilcoxon_results_Fate <- s_cycle_clr_forstat %>% 
+  group_by(contig) %>%
+  dplyr::summarize(
+    p_value = wilcox.test(clr ~ Disease_on_colony_when_coring_binary)$p.value,
+    statistic = wilcox.test(clr ~ Disease_on_colony_when_coring_binary)$statistic,
+    method = wilcox.test(clr ~ Disease_on_colony_when_coring_binary)$method
+  )
+
+# which genes are significantly different?
+S_results0.01 <- dplyr::filter(S_wilcoxon_results_Fate, p_value < 0.01) %>%
+  left_join(s_contig_hits, by = "contig") %>%
+  left_join(s_eggnog_hits_DMSP, by = c("contig" = "query"))
+S_results0.01
+
+S_results0.01$contig %>% unique %>% length
+
+# which genes are significantly different?
+S_results0.001 <- dplyr::filter(S_wilcoxon_results_Fate, p_value < 0.001) %>%
+  left_join(s_contig_hits, by = "contig") %>%
+  left_join(s_eggnog_hits_DMSP, by = c("contig" = "query"))
+S_results0.001
+
+S_results0.001$contig %>% unique %>% length
+
+# Try a bonferroni correction - 261 tests
+ntests_S <- s_cycle_clr_forstat$contig %>% unique %>% length
+
+S_resultsBC <- dplyr::filter(S_wilcoxon_results_Fate, p_value < 0.05/ntests_S) %>%
+  left_join(s_contig_hits, by = "contig") %>%
+  left_join(s_eggnog_hits_DMSP, by = c("contig" = "query"))
+S_resultsBC
+```
+
+### main figure
+```{r}
+s_cycle_forgraph_clr_sig01 <- s_cycle_forgraph_clr %>%
+  filter(contig %in% S_results0.01$contig) %>%
+  mutate(gene_shortname = paste0(Gene.abbreviation, PFAMs)) %>%
+  mutate(gene_shortname = str_replace_all(gene_shortname, "NA", ""))
+
+safe_colorblind_palette <- c("#000000", "#88CCEE", "#CC6677", "#DDCC77", "#117733", "#332288", "#AA4499", 
+                             "#44AA99", "#999933", "#882255", "#661100", "#6699CC", "#888888")
+
+palette_for_mags <- c("#B3E2CD", "#FDCDAC", "#CBD5E8", "#F4CAE4", "#E6F5C9", "#FFF2AE", "#F1E2CC", "#CCCCCC")
+
+s_cycle_forgraph_clr_sig01 <- s_cycle_forgraph_clr_sig01 %>%
+  mutate(contig = factor(contig,
+                         levels = c("k127_1087367_3", "k127_1157184_1", "k127_881950_25", "k127_129157_4",
+                                    "k127_199314_1", "k127_191079_2", "k127_3369475_10", "k127_1050565_91",
+                                    "k127_3384539_4", "k127_959642_3", "k127_2757884_1"))) %>%
+  mutate(gene_shortname = factor(gene_shortname,
+                         levels = c("sdo", "ahcY", "metH", "TPP_enzyme_C",
+                                    "metK", "dcyD", "luxS", "megL")))
+
+ggplot(s_cycle_forgraph_clr_sig01, aes(x = Disease_on_colony_when_coring_binary, y = clr)) +
+  geom_boxplot(lwd = 1, outlier.shape = NA) +
+  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
+  geom_jitter(position = position_jitter(width = .1, height = 0), 
+              aes(color = complete_classification.y, shape = Fate_after_SP1), size = 4) +
+  ylab("clr-transformed abundance") +
+  facet_wrap(. ~ gene_shortname + contig, scales = "free_y", ncol = 4) +
+  theme(axis.text.x = element_text(angle = 45, hjust= 1, vjust = 1)) +
+  #scale_color_manual(values = c("#888888", "#000000", "#88CCEE","#CC6677", "#332288", "#AA4499", 
+     #                        "#44AA99", "#999933", "#882255", "#661100", "#888888")) +
+  labs(shape = "Disease at sampling", color = "Taxonomic annotation of contig", x = "Fate after sampling")
+
+#ggsave("../figures/box_whisker_S_cycling_fate.pdf", width = 15, height = 7)
+
+ggplot(s_cycle_forgraph_clr_sig01, aes(x = Disease_on_colony_when_coring_binary, y = clr)) +
+  geom_boxplot(lwd = 1, outlier.shape = NA) +
+  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
+  geom_jitter(position = position_jitter(width = .1, height = 0), 
+              aes(color = complete_classification.y, shape = Fate_after_SP1), size = 4) +
+  ylab("clr-transformed abundance") +
+  facet_wrap(. ~ gene_shortname + contig, scales = "free_y", ncol = 4) +
+  theme(axis.text.x = element_text(angle = 45, hjust= 1, vjust = 1)) +
+  #scale_color_manual(values = c("#888888", "#000000", "#88CCEE","#CC6677", "#332288", "#AA4499", 
+     #                        "#44AA99", "#999933", "#882255", "#661100", "#888888")) +
+  labs(shape = "Disease at sampling", color = "Taxonomic annotation of contig", x = "Fate after sampling") +
+  theme(legend.position = "none")
+```
+
+## Vitamin and cofactor biosynthesis genes
+I want to see how vitamin biosynthesis genes are changing with coral fate. I would hypothesize that these are involved in coral health. This is more complicated to find, because the METABOLIC output that identifies the present/absent modules is not combined with a contig ID result. But the KO ID results are in the eggnog output. So I will combine the METABOLIC and the eggnog output. 
+
+### Organize data
+```{r}
+vitamin_hits_broad <- KEGG_hits %>%
+  filter(Module.Category == "Cofactor and vitamin metabolism") %>%
+  filter(FLK_OFAV_MG_pred.Module.presence == "Present")
+
+vitamin_hits_broad
+
+# Need a list of the KO ID's so that I can cross-reference it with the eggnog output
+vitamin_hits <- KEGG_step_hits %>%
+  filter(Module.Category == "Cofactor and vitamin metabolism") %>%
+  filter(FLK_OFAV_MG_pred.Module.step.presence == "Present") %>%
+  mutate(KO.id.test = str_split(KO.id, ",")) %>% # make mutliple KOs different columns 
+  unnest_wider(KO.id.test, names_sep = "_") %>%
+  gather(key = "KO_arbitrary_id", value = "KO", KO.id.test_1:KO.id.test_6) %>%
+  filter(!is.na(KO)) %>%
+  mutate(KO = str_split(KO, "[+]")) %>% # make mutliple KOs different columns that have plusses
+  unnest_wider(KO, names_sep = "_") %>%
+  gather(key = "KO_arbitrary_id2", value = "KO", KO_1:KO_3) %>%
+  filter(!is.na(KO)) %>%
+  mutate(KO = str_split(KO, "[-]")) %>% # make mutliple KOs different columns that have minuses
+  unnest_wider(KO, names_sep = "_") %>%
+  gather(key = "KO_arbitrary_id3", value = "KO", KO_1:KO_2) %>%
+  filter(!is.na(KO)) %>%
+  mutate(KO = str_replace_all(KO, "[)]", "")) %>% # remove the random parentheses
+  mutate(KO = str_replace_all(KO, "[(]", ""))
+
+vitamin_hits
+
+# Now I need a list of the contigs that go with the different KO ids from the eggnog functional results
+vitamin_eggnog_ko_contigs <- fxn %>%
+  dplyr::select(query, KEGG_ko, KEGG_Module) %>%
+  mutate(KEGG_ko = str_split(KEGG_ko, ",")) %>% # make mutliple KOs different columns 
+  unnest_wider(KEGG_ko, names_sep = "_") %>%
+  gather(key = "KO_random_number", value = "KO", KEGG_ko_1:KEGG_ko_15) %>%
+  filter(!is.na(KO)) %>%
+  mutate(KO = str_replace_all(KO, "ko:", "")) %>% # remove the random "ko:"
+  dplyr::select(!KO_random_number)
+
+vitamin_eggnog_ko_contigs
+
+# Add the contig ID information to the KEGG module information
+vitamin_ko_contig_hits <- vitamin_hits %>%
+  left_join(vitamin_eggnog_ko_contigs, by = "KO", relationship = "many-to-many") # need many to many because there are multiple x and y matches
+
+vitamin_ko_contig_hits
+
+# Which contigs contain vitamin biosynthesis genes?
+vitamin_ko_contig_hits$query
+
+vitamin_cycling_contigs <- vitamin_ko_contig_hits$query %>% unique
+
+# make a ps object with only those vitamin biosynthesis contigs
+ps.count.clr_vitamin <- prune_taxa(vitamin_cycling_contigs, ps.count_clr)
+
+vitamin_forgraph_clr <- as.data.frame(otu_table(ps.count.clr_vitamin)) %>%
+  mutate(contig = rownames(.)) %>%
+  left_join(vitamin_ko_contig_hits, by = c("contig" = "query"), relationship = "many-to-many") %>% # need to set many to many because multiple contigs have multiple annotations
+  gather(key = "CoralID", value = "clr", 1:41) %>% 
+  left_join(metadata, by = "CoralID") %>%   # add the metadata
+  left_join(taxa, by = "contig") %>% # add the taxonomy
+  mutate(Fate_after_SP1 = factor(Fate_after_SP1, 
+                                 levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))) %>%
+  mutate(Disease_on_colony_when_coring_binary = factor(Disease_on_colony_when_coring_binary, 
+                                 levels = c("Unaffected", "Diseased")))
+
+vitamin_forgraph_clr
+```
+
+### Wilcox test
+
+So now I want to compare the results between the different genes, but I don't want to count contigs twice. Instead, if a contig has multiple annotations, I need to make sure my statistical tests are only incorporating one set of the contigs. 
+```{r}
+vitamin_clr_forstat <- as.data.frame(otu_table(ps.count.clr_vitamin)) %>%
+  mutate(contig = rownames(.)) %>%
+  gather(key = "CoralID", value = "clr", 1:41) %>% 
+  left_join(metadata, by = "CoralID") %>%   # add the metadata
+  left_join(taxa, by = "contig") %>% # add the taxonomy
+  mutate(Disease_on_colony_when_coring_binary = factor(Disease_on_colony_when_coring_binary, 
+                                 levels = c("Unaffected", "Diseased")))
+
+summary(plyr::count(vitamin_clr_forstat$contig)$freq) # verify you have the same number of samples for each contig
+
+set.seed(100)
+
+# perform wilcoxon test for each contig between the subset fate categories
+vitamin_wilcoxon_results_Fate <- vitamin_clr_forstat %>% 
+  group_by(contig) %>%
+  dplyr::summarize(
+    p_value = wilcox.test(clr ~ Disease_on_colony_when_coring_binary)$p.value,
+    statistic = wilcox.test(clr ~ Disease_on_colony_when_coring_binary)$statistic,
+    method = wilcox.test(clr ~ Disease_on_colony_when_coring_binary)$method
+  )
+
+# which genes are significantly different?
+dplyr::filter(vitamin_wilcoxon_results_Fate, p_value < 0.01) %>% nrow #22 genes
+
+vit_results0.01 <- dplyr::filter(vitamin_wilcoxon_results_Fate, p_value < 0.01) %>%
+  left_join(vitamin_ko_contig_hits, by = c("contig" = "query"), relationship = "many-to-many")
+
+vit_results0.01
+
+vit_results0.01$contig %>% unique %>% length
+
+# Try a bonferroni correction - 261 tests
+ntests_V <- vitamin_clr_forstat$contig %>% unique %>% length
+
+V_resultsBC <- dplyr::filter(vitamin_wilcoxon_results_Fate, p_value < 0.05/ntests_V) %>%
+  left_join(vitamin_ko_contig_hits, by = c("contig" = "query"), relationship = "many-to-many")
+
+V_resultsBC
+```
+
+
+You know what would be better? z-score standardize each gene across the samples so I can see which one is higher/lower in each sample.
+
+```{r}
+# Step 1: select the data 
+data <- prune_taxa(unique(vit_results0.01$contig), ps.count_clr)
+
+data_wide <- as.data.frame(otu_table(data)) %>%
+  t() %>%
+  as.data.frame()
+
+# Step 3: Standardize the data using z-score standardization for each gene across samples
+sample_ids <- rownames(data_wide)
+gene_data_scaled <- as.data.frame(scale(data_wide))
+gene_data_scaled <- cbind(CoralID = sample_ids, gene_data_scaled)
+
+# Step 4: Reshape back to long format
+gene_data_scaled_long <- gene_data_scaled %>%
+  gather(key = "contig", value = "z_score_clr", k127_20672_2:k127_3398162_2) %>%
+  left_join(vitamin_ko_contig_hits, by = c("contig" = "query"), relationship = "many-to-many") %>%
+  left_join(metadata, by = "CoralID") %>%   # add the metadata
+  left_join(taxa, by = "contig") %>% # add the taxonomy
+  mutate(Disease_on_colony_when_coring_binary = factor(Disease_on_colony_when_coring_binary, 
+                                 levels = c("Unaffected", "Diseased"))) %>%
+  mutate(module_broad = str_split_i(Module, ",", 1))
+```
+
+### main figure
+Heatmap figure
+```{r}
+safe_colorblind_palette <- c("#000000", "#88CCEE", "#CC6677", "#DDCC77", "#117733", "#332288", "#AA4499", 
+                             "#44AA99", "#999933", "#882255", "#661100", "#6699CC", "#888888")
+
+palette_for_mags <- c("#B3E2CD", "#FDCDAC", "#CBD5E8", "#F4CAE4", "#E6F5C9", "#FFF2AE", "#F1E2CC", "#CCCCCC")
+
+# Step 5: Make a tiled graph that should be scaled for each gene
+ggplot(gene_data_scaled_long, aes(x = CoralID, y = contig)) +
+  geom_tile(aes(fill = z_score_clr)) +
+  facet_grid(module_broad ~ Disease_on_colony_when_coring_binary, scales = "free", space = "free") +
+  theme(axis.text.x = element_text(angle = 45, hjust= 1, vjust = 1)) +
+  scale_fill_gradientn(colors = hcl.colors(256, "Spectral", rev = TRUE)) +
+  labs(fill = "Z-score of clr-based abundance", x = "Coral ID", y = "Contig in co-assembly")
+
+# ggsave("../figures/heatmap_vitamin_fate.pdf", width = 11, height = 8)
+```
+
+### Supplementary figure
+Supplementary box and whisker plot
+```{r}
+vitamin_forgraph_clr_sig <- vitamin_forgraph_clr %>%
+  filter(contig %in% vit_results0.01$contig) 
+
+# Make a pretty box and whisker plot graph 
+ggplot(vitamin_forgraph_clr_sig, aes(x = Disease_on_colony_when_coring_binary, y = clr)) +
+  geom_boxplot(lwd = 1, outlier.shape = NA) +
+  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
+  geom_jitter(position = position_jitter(width = .1, height = 0), 
+              aes(color = complete_classification, shape = Disease_on_colony_when_coring_binary), size = 4) +
+  ylab("clr-transformed abundance") +
+  facet_wrap(. ~ contig, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 45, hjust= 1, vjust = 1)) +
+  labs(shape = "Fate after sampling", 
+       color = "Taxonomic annotation of contig", 
+       x = "Disease at sampling") 
+
+#ggsave("../figures/box_whisker_vitamin_fate.png", width = 16, height = 8)
+
+ggplot(vitamin_forgraph_clr_sig, aes(x = Disease_on_colony_when_coring_binary, y = clr)) +
+  geom_boxplot(lwd = 1, outlier.shape = NA) +
+  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
+  geom_jitter(position = position_jitter(width = .1, height = 0), 
+              aes(color = complete_classification, shape = Disease_on_colony_when_coring_binary), size = 4) +
+  ylab("clr-transformed abundance") +
+  facet_wrap(. ~ contig, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 45, hjust= 1, vjust = 1)) +
+  labs(shape = "Fate after sampling", 
+       color = "Taxonomic annotation of contig", 
+       x = "Disease at sampling") +
+  theme(legend.position = "none")
+```
