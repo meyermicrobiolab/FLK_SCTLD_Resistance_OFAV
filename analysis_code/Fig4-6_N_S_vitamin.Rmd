@@ -80,6 +80,8 @@ META = sample_data(metadata_3)
 
 ps.count <- phyloseq(NUMREADS, META)
 ps.count
+
+saveRDS(ps.count, "corncob_output_disease_at_sampling.rds")
 ```
 
 ## clr-transf phyloseq object

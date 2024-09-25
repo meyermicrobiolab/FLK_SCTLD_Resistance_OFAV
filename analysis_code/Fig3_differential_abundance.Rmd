@@ -21,8 +21,260 @@ setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
 
 ```{r packages, message=FALSE, warning=FALSE, results='hide'}
 # For data wrangling
+library(dplyr)
+library(tidyr)
+library(readxl)
 
 # For visualization
+library(corncob)
+library(DESeq2)
+library(phyloseq)
+```
+
+# Read in data
+
+## Load raw data 
+
+```{r}
+# Load table with count abundances from salmon ("numreads")
+numreads <- read.table("../data/FLK_coassembly_salmon_quant_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
+numreads <- numreads[, -1] # get rid of the first column cause it is just numbered lines
+
+# Load the table with taoxnomic information from mmseqs2
+taxa <- read.table("../data/FLK_coassembly_tax_mmseqs2_lca.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
+
+# Load the table with functional information from eggnog mapper
+fxn <- read_excel("../data/FLK_coassembly_fxn_eggnog.xlsx", skip = 2, na = "-")
+
+# Load metadata
+metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
+rownames(metadata) <- metadata$CoralID
+
+# how many contigs are zero across all samples?
+table(rowSums(numreads) == 0)
+
+# remove them
+numreads_nozero <- numreads[rowSums(numreads) != 0, ]
+dim(numreads_nozero)
+
+# any samples with no reads?
+table(colSums(numreads_nozero) == 0)
+
+# Fix the sample names
+colnames(numreads_nozero) <- str_replace_all(colnames(numreads_nozero), pattern = "[X]", "")
+colnames(numreads_nozero) <- str_split_i(colnames(numreads_nozero), "[_]", 1)
+```
+
+## Phyloseq object 
+```{r}
+idx <- match(colnames(numreads_nozero), rownames(metadata))
+metadata_3 <- metadata[idx,]
+
+NUMREADS = otu_table(numreads_nozero, taxa_are_rows = TRUE)
+META = sample_data(metadata_3)
+
+ps.count <- phyloseq(NUMREADS, META)
+ps.count
+```
+
+## Annotated genes only
+I would like to filter this phyloseq object to only include genes that are annotated. My rationale is that if I am to pull out any discussion or prediction about functional potential of the differentially abundant genes, then it would be useful to have that be what I do the analysis with. 
+```{r}
+numreads_nozero_for_fxn_filt <- numreads_nozero %>%
+  mutate(query = rownames(numreads_nozero))
+
+# Add count (number of reads) to the function data frame
+fxn.numreads_nozero <- fxn %>%
+  left_join(numreads_nozero_for_fxn_filt, by = "query")
+
+fxn.numreads_nozero
+
+# Select out only the reads again
+numreads_nozero_annotated_only <- as.data.frame(fxn.numreads_nozero[,22:62])
+rownames(numreads_nozero_annotated_only) <- fxn.numreads_nozero$query
+
+# It has occurrred to me that some of these annotations are actually missing from the abundance table so are showing up as NAs. I need to remove those samples. 
+table(is.na(rowSums(numreads_nozero_annotated_only)))
+table(is.finite(rowSums(numreads_nozero_annotated_only)))
+
+numreads_nozero_annotated_only_noNA <-
+  numreads_nozero_annotated_only[is.finite(rowSums(numreads_nozero_annotated_only)), ]
+
+numreads_nozero_annotated_only_noNA %>% dim
+
+# Make the actual phyloseq object
+idx <- match(colnames(numreads_nozero_annotated_only_noNA), metadata$CoralID)
+metadata_annotated <- metadata[idx,]
+
+NUMREADS = otu_table(numreads_nozero_annotated_only_noNA, taxa_are_rows = TRUE)
+META = sample_data(metadata_annotated)
+
+ps.count.annotated <- phyloseq(NUMREADS, META)
+ps.count.annotated
+```
+This drastically reduced the number of genes I am working with, which makes sense. Ultimately, I am only doing annotated genes because I want to be able to draw biological conclusions from the data. 
+
+## Save PS annotated object
+```{r}
+saveRDS(ps.count.annotated, "../data/FLK_coassembly_phyloseq_count.annotated.rds")
+```
+
+## Quick start - load ps object
+```{r}
+# Now what is it like to read this back in?
+ps.count.annotated <- readRDS("../data/FLK_coassembly_phyloseq_count.annotated.rds")
+```
+
+# Differential abundance 
+## deseq2 using the following code:
+Set the levels of the factor of interest
+```{r}
+sample_data(ps.count.annotated)$Disease_on_colony_when_coring_binary <-
+  factor(sample_data(ps.count.annotated)$Disease_on_colony_when_coring_binary, 
+         levels = c("Unaffected", "Diseased"))
+
+head(sample_data(ps.count.annotated)$Disease_on_colony_when_coring_binary, 10) # levels look good
+```
+
+These levels look good, and we are good to move on to DESeq2 analysis on the OFAV florida keys samples between completely unaffected to persistantly diseased coral colonies. 
+```{r}
+dds = phyloseq_to_deseq2(ps.count.annotated, ~ Disease_on_colony_when_coring_binary)
+dds
+
+#Keep all rows and apply geometric mean to replace zeros
+cts <- DESeq2::counts(dds)
+geoMeans <- apply(cts, 1, function(row) if (all(row == 0)) 0 else exp(mean(log(row[row != 0]))))
+dds <- estimateSizeFactors(dds, geoMeans = geoMeans)
+
+# run the actual deseq function - check results at 0.05 p adjusted value
+dds <- DESeq(dds,test="Wald", fitType="parametric")
+res = results(dds, cooksCutoff = FALSE)
+alpha = 0.05
+sigtab = res[which(res$padj < alpha), ] # 5,894 DA genes
+
+# Add the functional annotations to the subset differentially abundant genes
+sigtab.fxn <- as(sigtab, "data.frame") %>% 
+  mutate(query = rownames(sigtab)) %>% 
+  left_join(fxn, by = "query")
+
+# Write these taxa out to a file to be saved for later
+write.table(sigtab.fxn,"../data/DESeq2_coassembly_results_disease_0.05.txt", sep="\t", 
+            col.names = TRUE, row.names = FALSE)
+
+# Write the 0.01 cutoff genes
+alpha01 = 0.01
+sigtab01 = res[which(res$padj < alpha01), ] # 2,449 DA genes
+
+# Add the functional annotations to the subset differentially abundant genes
+sigtab01.fxn <- as(sigtab01, "data.frame") %>% 
+  mutate(query = rownames(sigtab01)) %>% 
+  left_join(fxn, by = "query")
+
+# Write these taxa out to a file to be saved for later
+write.table(sigtab01.fxn,"../data/DESeq2_coassembly_results_disease_0.01.txt", sep="\t", 
+            col.names = TRUE, row.names = FALSE)
+
+sigtab.fxn
+sigtab01.fxn
+```
+
+## Corncob using the following code:
+```{r, eval=FALSE}
+set.seed(10) # set seed for reproducibility
+corncobDA.dis <- differentialTest(formula = ~ Disease_on_colony_when_coring_binary, 
+                                   phi.formula = ~ Disease_on_colony_when_coring_binary,
+                                   formula_null = ~ 1,
+                                   phi.formula_null = ~ Disease_on_colony_when_coring_binary,
+                                   test = "Wald", boot = FALSE,
+                                   data = ps.count.annotated,
+                                   fdr_cutoff = 0.05)
+
+# Save the corncob phyloseq object so you can manipulate it in R
+saveRDS(corncobDA.dis, "corncob_output_disease_at_sampling.rds")
+
+## Try controlling for the differences in the symbiont community
+set.seed(10) # set seed for reproducibility
+corncobDA.dis.symb <- differentialTest(formula = ~ Disease_on_colony_when_coring_binary + Zoox_background, 
+                                  phi.formula = ~ Disease_on_colony_when_coring_binary + Zoox_background,
+                                  formula_null = ~ Zoox_background,
+                                  phi.formula_null = ~ Disease_on_colony_when_coring_binary + Zoox_background,
+                                  test = "Wald", boot = FALSE,
+                                  data = ps.count.annotated,
+                                  fdr_cutoff = 0.05)
+
+# Save the corncob phyloseq object so you can manipulate it in R
+saveRDS(corncobDA.dis.symb, "corncob_output_disease_at_sampling_zoox.rds")
+```
+I would like to see how the number of differentially abudnant genes differs between these two runs, but I feel like I should do the second one, because it accounts for background zoox, which significantly explained variation in the microbiome, so I feel it is best to account for both things. 
+
+### disease at sampling only
+Then, I manipulated and saved the corncob output with this code:
+```{r}
+# read in RDS file
+corncobDA.dis <- readRDS("../data/corncob_output_disease_at_sampling.rds")
+
+plot(corncobDA.dis)
+
+# How many significant taxa are there?
+corncobDA.dis$significant_taxa %>% length
+```
+
+
+```{r}
 
 ```
 
+### diseae at sampling while controlling for differential abundance due to background zooxanthellae
+```{r}
+# read in RDS file
+corncobDA.dis.symb <- readRDS("../data/corncob_output_disease_at_sampling_zoox.rds")
+
+plot(corncobDA.dis.symb)
+
+# How many significant taxa are there?
+corncobDA.dis.symb$significant_taxa %>% length
+```
+There are so many taxa that are differentially abundant. To get the ones that change most, it may be worthwhile to identify the taxa with the greatest change between unaffected and diseased taxa, or those with the greatest coefficient (positive or negative).
+```{r}
+# I want to extract the important information from this into a table...
+# check out results structure from one of the models
+corncobDA.dis.symb$significant_models[[1]]$coefficients
+
+# write a function to extract the corncob results
+extractmods2 <- function(model) {
+  result <- data.frame("Estimate" = model$coefficients[2, 1], 
+                        "Std.Error" = model$coefficients[2, 2], 
+                        "p" = model$coefficients[2, 4])
+  return(result)
+}
+
+# save the output as a list using the above function
+corncob.dis.symb.models <- lapply(corncobDA.dis.symb$significant_models, extractmods2)
+names(corncob.dis.symb.models) <- corncobDA.dis.symb$significant_taxa
+
+# save a table of annotations for just the significant genes
+sig.fxnl.genes.dis.symb <- filter(fxn, query %in% corncobDA.dis.symb$significant_taxa)
+
+# turn the output from a list to a dataframe for ease of saving and manipulating
+corncob.dis.symb.models.df <- plyr::ldply(corncob.dis.symb.models, data.frame) %>% 
+  left_join(sig.fxnl.genes.dis.symb, by = c(".id" = "query"))
+
+### Save these data so you don't have to re-run the model ###
+write.table(corncob.dis.symb.models.df, "../data/Corncob_coassembly_results_dis.symb_0.05.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+```
+
+## Corncob disease and symbiont
+Read in the corncob data. I have a couple of questions. I want to see what the greatest 
+```{r}
+corn.dis.symb <- read.table("../data/Corncob_coassembly_results_dis.symb_0.05.txt", header = TRUE, sep = "\t")
+
+corn.dis.symb$Estimate %>% summary
+
+table(corn.dis.symb$Estimate > 1) 
+table(corn.dis.symb$Estimate < -1) 
+table(corn.dis.symb$Estimate < -3) 
+table(corn.dis.symb$Estimate > 3) 
+table(corn.dis.symb$Estimate < -3.5) 
+table(corn.dis.symb$Estimate > 5) 
+```
+## Figure for MS
