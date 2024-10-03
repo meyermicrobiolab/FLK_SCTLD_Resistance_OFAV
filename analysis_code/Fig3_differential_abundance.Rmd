@@ -29,6 +29,7 @@ library(readxl)
 library(corncob)
 library(DESeq2)
 library(phyloseq)
+library(randomcoloR)
 ```
 
 # Read in data
@@ -270,7 +271,7 @@ corn.dis.symb <- read.table("../data/Corncob_coassembly_results_dis.symb_0.05.tx
 
 corn.dis.symb$Estimate %>% summary
 
-table(corn.dis.symb$Estimate > 1) 
+table(corn.dis.symb$Estimate > 0) 
 table(corn.dis.symb$Estimate < -1) 
 table(corn.dis.symb$Estimate < -3) 
 table(corn.dis.symb$Estimate > 3) 
@@ -278,3 +279,106 @@ table(corn.dis.symb$Estimate < -3.5)
 table(corn.dis.symb$Estimate > 5) 
 ```
 ## Figure for MS
+
+I imagine producing a table of all the differentially abundant genes, but for a general figure, I am interested in:
+- What functions are these differentially abundant genes performing?
+- What taxonomic groups are these differentially abundant genes part of?
+
+Genes enriched in diseased - what taxonomic groups are there?
+Genes enriched in unaffected - what taxonomic groups are there?
+
+We conducted differential abundance tests in apparently healthy tissue between unaffected and diseased coral colonies while controlling for the effect of background symbiodiniaceae on differential abundance, and identified 1,605 differentially abundant genes (supplementary table). This included 303 enriched in diseased tissue, and 1302 enriched in unaffected coral tissue. These genes were from varied taxonomic groups, including x, y, and z. 
+
+### Taxonomic info
+```{r}
+# What taxa ID is assigned to genes that were enriched in disease
+corn.dis.symb_tax <- corn.dis.symb %>%
+  left_join(taxa, by = c(".id" = "contig")) %>%
+  separate(complete_classification, 
+           into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
+           sep = "[;]", remove = FALSE)
+
+# How many of the total differentially abundant genes were actually annotated as bacteria?
+# disease-enriched - 168 of 303 
+dis.prok <- filter(corn.dis.symb_tax, Estimate > 0) %>% 
+  filter(Domain %in% c("d_Bacteria", "d_Archaea")) %>%
+  mutate(Phylum = case_when(
+    is.na(Phylum) ~ paste0(Domain),
+    TRUE ~ Phylum
+    )) %>%
+  mutate(Class = case_when(
+    is.na(Class) ~ paste0(Phylum),
+    TRUE ~ Class
+    )) %>%
+  mutate(Order = case_when(
+    is.na(Order) ~ paste0(Class),
+    TRUE ~ Order
+    )) %>%
+  mutate(Family = case_when(
+    is.na(Family) ~ paste0(Order),
+    TRUE ~ Family
+    )) %>%
+  mutate(Genus = case_when(
+    is.na(Genus) ~ paste0(Family),
+    TRUE ~ Genus
+    )) %>%
+  mutate(Species = case_when(
+    is.na(Species) ~ paste0(Genus),
+    TRUE ~ Species
+    ))
+
+
+# unaffected-enriched - 1,129 of 1,302
+unaff.prok <- filter(corn.dis.symb_tax, Estimate < 0) %>% 
+  filter(Domain %in% c("d_Bacteria", "d_Archaea")) %>%
+  mutate(Phylum = case_when(
+    is.na(Phylum) ~ paste0(Domain),
+    TRUE ~ Phylum
+    )) %>%
+  mutate(Class = case_when(
+    is.na(Class) ~ paste0(Phylum),
+    TRUE ~ Class
+    )) %>%
+  mutate(Order = case_when(
+    is.na(Order) ~ paste0(Class),
+    TRUE ~ Order
+    )) %>%
+  mutate(Family = case_when(
+    is.na(Family) ~ paste0(Order),
+    TRUE ~ Family
+    )) %>%
+  mutate(Genus = case_when(
+    is.na(Genus) ~ paste0(Family),
+    TRUE ~ Genus
+    )) %>%
+  mutate(Species = case_when(
+    is.na(Species) ~ paste0(Genus),
+    TRUE ~ Species
+    ))
+
+1129/1303 # 86.6%
+
+# Can I just make a stacked bar chart with two columns (one disease and one unaffected)?
+dis.unaff.prok <- rbind(dis.prok, unaff.prok) %>%
+  mutate(corncob_result = ifelse(Estimate > 0, "Disease_assoc", "Unaffected_assoc"))
+
+x1 <- distinctColorPalette(50)
+
+# Make a plot
+ggplot(dis.unaff.prok, aes(x = corncob_result, fill = Phylum)) +
+  geom_bar() +
+  scale_fill_manual(values = x1)
+
+ggplot(dis.unaff.prok, aes(x = corncob_result, fill = Phylum)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = x1)
+
+ggplot(dis.unaff.prok, aes(x = corncob_result, fill = Class)) +
+  geom_bar() +
+  scale_fill_manual(values = x1)
+
+ggplot(dis.unaff.prok, aes(x = corncob_result, fill = Class)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = x1)
+```
+

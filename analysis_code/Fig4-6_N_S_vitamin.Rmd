@@ -80,8 +80,6 @@ META = sample_data(metadata_3)
 
 ps.count <- phyloseq(NUMREADS, META)
 ps.count
-
-saveRDS(ps.count, "corncob_output_disease_at_sampling.rds")
 ```
 
 ## clr-transf phyloseq object
@@ -575,3 +573,259 @@ ggplot(vitamin_forgraph_clr_sig, aes(x = Disease_on_colony_when_coring_binary, y
        x = "Disease at sampling") +
   theme(legend.position = "none")
 ```
+
+# Corncob on METABOLIC genes
+
+I want to use corncob because corncob can control for different variables, like zoox_background. I am interested in nitrogen-cycling genes, sulfur-cycling genes, and vitamin biosynthesis genes as these are genes predicted to have a beneficial role in the coral holobiont. I hypothesize that these genes will be enriched in apparently healthy tissue from unaffected colonies relative to apparently healthy tissue from diseased colonies. Given the known role of background zooxanthellae in influencing microbial functional community variability, I want to control for the effect of background zooxanthellae when conducting my statistical test. 
+
+## Nitrogen contig list
+```{r}
+n_hits <- fxns_hits %>%
+  filter(Category == "Nitrogen cycling") %>%
+  filter(FLK_OFAV_MG_pred.Function.presence == "Present")
+
+n_hits
+
+n_contig_hits <- HMM_hits %>%
+  filter(Category == "Nitrogen cycling") %>%
+  filter(FLK_OFAV_MG_pred.Hmm.presence == "Present") %>%
+  mutate(FLK_OFAV_MG_pred.Hits = str_split(FLK_OFAV_MG_pred.Hits, ",")) %>%
+  unnest_wider(FLK_OFAV_MG_pred.Hits, names_sep = "_") %>%
+  gather(key = "arbitrary_hit_number", value = "contig", FLK_OFAV_MG_pred.Hits_1:FLK_OFAV_MG_pred.Hits_14) %>%
+  filter(!is.na(contig))
+
+# Which contigs contain nitrogen cycling genes?
+n_contig_hits$contig
+
+n_cycling_contigs <- n_contig_hits$contig
+
+plyr::count(n_cycling_contigs) %>% nrow # number of unique genes
+```
+
+## Sulfur contig list
+```{r}
+# inorganic sulfur cycling functions
+s_hits <- fxns_hits %>%
+  filter(Category == "Sulfur cycling") %>%
+  filter(FLK_OFAV_MG_pred.Function.presence == "Present")
+
+s_hits
+
+# inorganic and organic sulfur cycling
+s_contig_hits_summary <- HMM_hits %>%
+  filter(Category %in% c("Sulfur cycling", "Sulfur cycling enzymes (detailed)")) %>%
+  filter(FLK_OFAV_MG_pred.Hmm.presence == "Present")
+
+s_contig_hits_summary
+
+# Check out the gene names
+s_contig_hits_summary %>% 
+  dplyr::select(Gene.abbreviation, Gene.name) %>%
+  mutate(combo = paste0(Gene.abbreviation, " = ", Gene.name)) %>%
+  dplyr::select(combo) %>%
+  unique %>%
+  as.data.frame
+
+# I also found some DMSP degrading activity in the eggnog results, cause there werent any in the metabolic database
+s_eggnog_hits_DMSP <- fxn %>% 
+  filter(Description %in% c("Mediates cleavage of dimethlysulfonioproprionate (DMSP) into dimethyl sulfide (DMS) and acrylate. DMS is the principal form by which sulfur is transported from oceans to the atmosphere and is a key component of the ocean sulfur cycle", "Dimethlysulfonioproprionate lyase")) %>%
+  left_join(taxa, by = c("query" = "contig"))
+
+s_eggnog_hits_DMSP
+
+s_contig_hits <- HMM_hits %>%
+  filter(Category %in% c("Sulfur cycling", "Sulfur cycling enzymes (detailed)")) %>%
+  filter(FLK_OFAV_MG_pred.Hmm.presence == "Present") %>%
+  mutate(FLK_OFAV_MG_pred.Hits = str_split(FLK_OFAV_MG_pred.Hits, ",")) %>%
+  unnest_wider(FLK_OFAV_MG_pred.Hits, names_sep = "_") %>%
+  gather(key = "arbitrary_hit_number", value = "contig", FLK_OFAV_MG_pred.Hits_1:FLK_OFAV_MG_pred.Hits_50) %>%
+  filter(!is.na(contig))
+
+s_contig_hits
+
+# Which contigs contain sulfur cycling genes? Combine the eggnog sulfur contigs and the metabolic sulfur contigs
+s_contig_hits$contig
+s_eggnog_hits_DMSP$query
+
+s_cycling_contigs <- c(s_contig_hits$contig, s_eggnog_hits_DMSP$query)
+
+plyr::count(s_cycling_contigs) %>% nrow # number of unique genes
+```
+
+## Vitamin biosynthesis contig list
+```{r}
+vitamin_hits_broad <- KEGG_hits %>%
+  filter(Module.Category == "Cofactor and vitamin metabolism") %>%
+  filter(FLK_OFAV_MG_pred.Module.presence == "Present")
+
+vitamin_hits_broad
+
+# Need a list of the KO ID's so that I can cross-reference it with the eggnog output
+vitamin_hits <- KEGG_step_hits %>%
+  filter(Module.Category == "Cofactor and vitamin metabolism") %>%
+  filter(FLK_OFAV_MG_pred.Module.step.presence == "Present") %>%
+  mutate(KO.id.test = str_split(KO.id, ",")) %>% # make mutliple KOs different columns 
+  unnest_wider(KO.id.test, names_sep = "_") %>%
+  gather(key = "KO_arbitrary_id", value = "KO", KO.id.test_1:KO.id.test_6) %>%
+  filter(!is.na(KO)) %>%
+  mutate(KO = str_split(KO, "[+]")) %>% # make mutliple KOs different columns that have plusses
+  unnest_wider(KO, names_sep = "_") %>%
+  gather(key = "KO_arbitrary_id2", value = "KO", KO_1:KO_3) %>%
+  filter(!is.na(KO)) %>%
+  mutate(KO = str_split(KO, "[-]")) %>% # make mutliple KOs different columns that have minuses
+  unnest_wider(KO, names_sep = "_") %>%
+  gather(key = "KO_arbitrary_id3", value = "KO", KO_1:KO_2) %>%
+  filter(!is.na(KO)) %>%
+  mutate(KO = str_replace_all(KO, "[)]", "")) %>% # remove the random parentheses
+  mutate(KO = str_replace_all(KO, "[(]", ""))
+
+vitamin_hits
+
+# Now I need a list of the contigs that go with the different KO ids from the eggnog functional results
+vitamin_eggnog_ko_contigs <- fxn %>%
+  dplyr::select(query, KEGG_ko, KEGG_Module) %>%
+  mutate(KEGG_ko = str_split(KEGG_ko, ",")) %>% # make mutliple KOs different columns 
+  unnest_wider(KEGG_ko, names_sep = "_") %>%
+  gather(key = "KO_random_number", value = "KO", KEGG_ko_1:KEGG_ko_15) %>%
+  filter(!is.na(KO)) %>%
+  mutate(KO = str_replace_all(KO, "ko:", "")) %>% # remove the random "ko:"
+  dplyr::select(!KO_random_number)
+
+vitamin_eggnog_ko_contigs
+
+# Add the contig/gene ID information to the KEGG module information
+vitamin_ko_contig_hits <- vitamin_hits %>%
+  left_join(vitamin_eggnog_ko_contigs, by = "KO", relationship = "many-to-many") # need many to many because there are multiple x and y matches
+
+vitamin_ko_contig_hits
+
+# Which contigs contain vitamin biosynthesis genes?
+vitamin_ko_contig_hits$query
+
+vitamin_cycling_contigs <- vitamin_ko_contig_hits$query %>% unique
+
+plyr::count(vitamin_cycling_contigs) %>% nrow # number of unique genes
+```
+
+## Subset count phyloseq object
+I need to combine the contig lists (actually these are gene lists, which are subsets of the contigs). With that, then I need to subset the phyloseq count data set that I previously made. 
+```{r}
+# list of all functional genes
+beneficial_fxn_genes <- c(n_cycling_contigs, s_cycling_contigs, vitamin_cycling_contigs)
+
+# subset data from ps object (count data)
+ps.beneficial_fxn_genes <- prune_taxa(beneficial_fxn_genes, ps.count)
+```
+
+## Run corncob analysis
+I want to test for differentially abundant genes within healthy tissue between unaffected and diseased coral colonies, while contorlling for the effect of background zooxanthellae on the abundance of the taxa. I will not test for differential dispersion.
+```{r}
+# Set the levels so that corncob will choose unaffected as baseline
+sample_data(ps.beneficial_fxn_genes)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.beneficial_fxn_genes)$Disease_on_colony_when_coring_binary,
+                                                                     levels = c("Unaffected", "Diseased"))
+
+## Control for the differences in the symbiont community
+set.seed(10) # set seed for reproducibility
+DA.METABOLIC.dis.symb <- differentialTest(formula = ~ Disease_on_colony_when_coring_binary + Zoox_background, 
+                                  phi.formula = ~ Disease_on_colony_when_coring_binary + Zoox_background,
+                                  formula_null = ~ Zoox_background,
+                                  phi.formula_null = ~ Disease_on_colony_when_coring_binary + Zoox_background,
+                                  test = "Wald", boot = FALSE,
+                                  data = ps.beneficial_fxn_genes,
+                                  fdr_cutoff = 0.05)
+
+plot(DA.METABOLIC.dis.symb)
+
+# Save the corncob phyloseq object so you can manipulate it in R
+saveRDS(DA.METABOLIC.dis.symb, "../data/corncob_METABOLIC_output_disease_at_sampling_zoox.rds")
+```
+OKay! So there are some differentially abundant genes! This is great and I feel better about how I am running the statistical tests on these data. I'm not exactly sure how to parse the data or visualize it yet, but this is at least cool that there are some clear results! Like before, I want to save a table of the corncob data output. 
+
+## Save corncob output to table
+```{r}
+# I want to extract the important information from this into a table...
+# check out results structure from one of the models
+DA.METABOLIC.dis.symb$significant_models[[1]]$coefficients
+
+# write a function to extract the corncob results
+extractmods2 <- function(model) {
+  result <- data.frame("Estimate" = model$coefficients[2, 1], 
+                        "Std.Error" = model$coefficients[2, 2], 
+                        "p" = model$coefficients[2, 4])
+  return(result)
+}
+
+# save the output as a list using the above function
+METABOLIC_corncob.dis.symb.models <- lapply(DA.METABOLIC.dis.symb$significant_models, extractmods2)
+names(METABOLIC_corncob.dis.symb.models) <- DA.METABOLIC.dis.symb$significant_taxa
+
+# turn the output from a list to a dataframe for ease of saving and manipulating
+METABOLIC_corncob.dis.symb.models.df <- plyr::ldply(METABOLIC_corncob.dis.symb.models, data.frame)
+
+### Save these data so you don't have to re-run the model ###
+write.table(METABOLIC_corncob.dis.symb.models.df, "../data/Corncob_coassembly_results_METABOLIC_dis.symb_0.05.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+```
+
+## Make tables of significance for N, S, Vitamin
+### Nitrogen 
+```{r}
+corn.dis.symb <- read.table("../data/Corncob_coassembly_results_METABOLIC_dis.symb_0.05.txt", header = TRUE, sep = "\t")
+
+N.da <- corn.dis.symb %>%
+  filter(.id %in% n_cycling_contigs) %>%
+  dplyr::left_join(n_contig_hits, by = c(".id" = "contig"))
+
+ggplot(N.da, aes(x = .id, y = Estimate, fill = Function)) +
+  geom_errorbar(aes(ymin = Estimate-Std.Error, ymax = Estimate+Std.Error), 
+                color = "black", width = .3, position=position_dodge(.9)) +
+  geom_point(size = 4, pch = 21) +
+  coord_flip() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "darkgray") +
+  labs(x = "Taxa", y = "Coefficient", title = "Nitrogen cycling DA genes")
+```
+
+### Sulfur
+```{r}
+corn.dis.symb <- read.table("../data/Corncob_coassembly_results_METABOLIC_dis.symb_0.05.txt", header = TRUE, sep = "\t")
+
+S.da <- corn.dis.symb %>%
+  filter(.id %in% s_cycling_contigs) %>%
+  dplyr::left_join(s_contig_hits, by = c(".id" = "contig")) %>%
+  dplyr::left_join(s_eggnog_hits_DMSP, by = c(".id" = "query")) %>%
+  mutate(Function = case_when(
+    .id == "k127_1971158_9" ~ "Mediates cleavage of DMSP to DMS and acrylate", TRUE ~ Function))
+
+ggplot(S.da, aes(x = .id, y = Estimate, fill = Function)) +
+  geom_errorbar(aes(ymin = Estimate-Std.Error, ymax = Estimate+Std.Error), 
+                color = "black", width = .3, position=position_dodge(.9)) +
+  geom_point(size = 4, pch = 21) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "darkgray") +
+  labs(x = "Taxa", y = "Coefficient", title = "Sulfur cycling DA genes") +
+  scale_fill_brewer(palette = "Paired") +
+  facet_grid(Function ~ ., space = "free", scales = "free") +
+  coord_flip()
+```
+
+### Vitamin
+```{r}
+corn.dis.symb <- read.table("../data/Corncob_coassembly_results_METABOLIC_dis.symb_0.05.txt", header = TRUE, sep = "\t")
+
+Vit.da <- corn.dis.symb %>%
+  filter(.id %in% vitamin_cycling_contigs) %>%
+  dplyr::left_join(vitamin_ko_contig_hits, by = c(".id" = "query")) %>% 
+  mutate(module_broad = str_split_i(Module, ",", 1))
+  
+ 
+x1 <- distinctColorPalette(20)
+
+ggplot(Vit.da, aes(x = .id, y = Estimate, fill = module_broad)) +
+  geom_errorbar(aes(ymin = Estimate-Std.Error, ymax = Estimate+Std.Error), 
+                color = "black", width = .3, position=position_dodge(.9)) +
+  geom_point(size = 4, pch = 21) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "darkgray") +
+  labs(x = "Taxa", y = "Coefficient", title = "Vitamin biosynthesis DA genes") +
+  scale_fill_manual(values = x1) +
+  facet_grid(module_broad ~ ., space = "free", scales = "free") +
+  coord_flip()
+```
+
