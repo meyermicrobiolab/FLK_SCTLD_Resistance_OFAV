@@ -24,9 +24,12 @@ setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
 library(dplyr)
 library(readxl)
 library(tidyr)
+library(stringr)
 
-# For visualization
+# For visualization & analysis
 library(ggplot2)
+library(phyloseq)
+library(corncob)
 ```
 
 # Load data
@@ -829,3 +832,143 @@ ggplot(Vit.da, aes(x = .id, y = Estimate, fill = module_broad)) +
   coord_flip()
 ```
 
+# METABOLIC Prokaryote-only assembly
+
+I re-ran metabolic on the prokaryote-only metagenome assembly. This was important because it allows me to more clearly isolate to only prokaryote genes. 
+
+## Load in the data
+```{r}
+#Load METABOLIC functional information
+HMM_hits_prok <- read_excel("../data/FLK_prok_coassembly_METABOLIC_result.xlsx", sheet = "HMMHitNum")
+
+# Load table with count abundances from salmon ("numreads")
+numreads <- read.table("../data/FLK_coassembly_salmon_quant_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
+numreads <- numreads[, -1] # get rid of the first column cause it is just numbered lines
+
+# Load the table with taoxnomic information from mmseqs2
+# NEED TO RE-RUN THIS IF I WANT TO HAVE IT FOR PROK ONLY STUFF
+
+# Load metadata
+metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
+rownames(metadata) <- metadata$CoralID
+```
+
+## Manipulate HHM hit data
+
+```{r}
+HMM_hits_long <- HMM_hits_prok %>%
+  filter(FLK_OFAV_MG_prok_pred.Hit.numbers > 0) %>%
+  mutate(FLK_OFAV_MG_prok_pred.Hits = str_split(FLK_OFAV_MG_prok_pred.Hits, ",")) %>%
+  unnest_wider(FLK_OFAV_MG_prok_pred.Hits, names_sep = "_") %>%
+  gather(key = "arbitrary_hit_number", value = "contig",
+         FLK_OFAV_MG_prok_pred.Hits_1:FLK_OFAV_MG_prok_pred.Hits_24) %>%
+  filter(!is.na(contig)) %>%
+  mutate(contig = str_split(contig, ";")) %>%
+  unnest_wider(contig, names_sep = "_") %>%
+  gather(key = "arbitrary_contig_number", value = "contig",
+         contig_1:contig_5) %>%
+  filter(contig != "None")
+
+HMM_hits_long
+
+# How many unique annotated genes?
+HMM_hits_long$contig %>% unique %>% length
+
+# Prep the data for phyloseq
+Hits_for_PS <- HMM_hits_long %>% 
+  dplyr::select(Category, Function, Gene.abbreviation, Gene.name, Corresponding.KO, Reaction, contig) %>%
+  dplyr::distinct(contig, .keep_all = TRUE) %>%
+  as.matrix()
+
+rownames(Hits_for_PS) <- Hits_for_PS[,"contig"]
+
+Hits_for_PS %>% dim
+```
+
+Now I have data on the contig/gene. Next, I need to run corncob, but I have a bit of a problem. I need to run salmon on these specific genes, unless prodigal output the same exact genes. I will try with my previous contig column, since theoretically the contig IDs are the same as from the co-assembly, but just represent a subset of the genes. 
+
+## Phyloseq object
+Create a phyloseq object with the count data. Remove any genes with zero abundances. Also make a phyloseq object with only the annotated genes. 
+```{r}
+# remove contigs with zero abundacne
+numreads_nozero <- numreads[rowSums(numreads) != 0, ]
+dim(numreads_nozero)
+
+# any samples with no reads?
+table(colSums(numreads_nozero) == 0)
+
+# Fix the sample names
+colnames(numreads_nozero) <- str_replace_all(colnames(numreads_nozero), pattern = "[X]", "")
+colnames(numreads_nozero) <- str_split_i(colnames(numreads_nozero), "[_]", 1)
+```
+
+Subset to only the contigs represented in the metabolic data
+```{r}
+unique_contigs <- HMM_hits_long$contig %>% unique
+
+contig_ids <- match(unique(HMM_hits_long$contig), rownames(numreads_nozero))
+
+numreads_nozero_metabolic_filt <- numreads_nozero[contig_ids,]
+numreads_nozero_metabolic_filt_nona <- na.omit(numreads_nozero_metabolic_filt)
+
+numreads_nozero_metabolic_filt_nona %>% dim
+```
+
+
+ORganize the data and make the final object - 655 unique taxa. Keep in mind some of the genes had multiple annotations so I just took the first one. 
+```{r}
+idx <- match(colnames(numreads_nozero_metabolic_filt_nona), rownames(metadata))
+metadata_3 <- metadata[idx,]
+
+NUMREADS = otu_table(numreads_nozero_metabolic_filt_nona, taxa_are_rows = TRUE)
+META = sample_data(metadata_3)
+FXN = tax_table(Hits_for_PS)
+
+ps.metabolic <- phyloseq(NUMREADS, META, FXN)
+ps.metabolic
+```
+
+## Corncob 
+I want to use corncob to test for differential abundance by disease at sampmling while controlling for the effect of background symbiodiniaceae.
+
+```{r}
+# Set the levels so that ALDEx2 will choose unaffected as baseline
+sample_data(ps.metabolic)$Disease_on_colony_when_coring_binary <- 
+  factor(sample_data(ps.metabolic)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
+
+## Try controlling for the differences in the symbiont community
+set.seed(10) # set seed for reproducibility
+corncobDA.dis.symb <- differentialTest(formula = ~ Disease_on_colony_when_coring_binary + Zoox_background, 
+                                  phi.formula = ~ Disease_on_colony_when_coring_binary + Zoox_background,
+                                  formula_null = ~ Zoox_background,
+                                  phi.formula_null = ~ Disease_on_colony_when_coring_binary + Zoox_background,
+                                  test = "Wald", boot = FALSE,
+                                  data = ps.metabolic,
+                                  fdr_cutoff = 0.05)
+
+plot(corncobDA.dis.symb, level = "Gene.name")
+plot(corncobDA.dis.symb, level = "Category")
+
+corncobDA.dis.symb$significant_taxa
+```
+I also want to use corncob to identify how genes are changing by fate. For this, I will use all 4 fate categories, and make the recovered fate the default, "control" fate. 
+```{r}
+# Set the levels so that ALDEx2 will choose unaffected as baseline
+sample_data(ps.metabolic)$Fate_after_SP1   <- 
+  factor(sample_data(ps.metabolic)$Fate_after_SP1, levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
+
+## Try controlling for the differences in the symbiont community
+set.seed(10) # set seed for reproducibility
+corncobDA.fate.symb <- differentialTest(formula = ~ Fate_after_SP1 + Zoox_background, 
+                                  phi.formula = ~ Fate_after_SP1 + Zoox_background,
+                                  formula_null = ~ Zoox_background,
+                                  phi.formula_null = ~ Fate_after_SP1 + Zoox_background,
+                                  test = "Wald", boot = FALSE,
+                                  data = ps.metabolic,
+                                  fdr_cutoff = 0.05)
+
+plot(corncobDA.fate.symb, level = "Gene.name")
+plot(corncobDA.fate.symb, level = "Category")
+
+corncobDA.fate.symb$significant_taxa
+```
