@@ -24,6 +24,7 @@ setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
 library(dplyr)
 library(tidyr)
 library(readxl)
+library(stringr)
 
 # For visualization
 library(corncob)
@@ -381,4 +382,193 @@ ggplot(dis.unaff.prok, aes(x = corncob_result, fill = Class)) +
   geom_bar(position = "fill") +
   scale_fill_manual(values = x1)
 ```
+
+# KEGG Diff. Abundance
+
+I want to analyze the differentially abunant genes of only annotated (by KEGG) the microbial genes that were annotated. 
+
+I recently re-ran Salmon to get gene abundances on all the prokaryote genes. The prokaryote genes were identified using EukRep. EukRep split the coassembly into prok and euk fractions. I then got predicted genes from prodigal (output both AA and nucleotide seqs). I took the prok fraction of predicted genes (nucleotide) and re-mapped the noneuk reads on the prok genes to get gene abundances. That is what I am now re-running all the PCA analyses on. 
+
+I also took the AA file of the predicted genes and ran that in the GhostKOALA database to get KEGG annotations. Kegg is useful because it has all that hierarchical data. 
+
+## Data 
+```{r}
+# Load table with count abundances from salmon ("numreads")
+prokreads <- read.table("../data/prok_FLK_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
+prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
+
+# Load metadata
+metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
+rownames(metadata) <- metadata$CoralID
+
+# how many genes are zero across all samples? Like 32k
+table(rowSums(prokreads) == 0)
+
+# remove them
+prokreads_nozero <- prokreads[rowSums(prokreads) != 0, ]
+dim(prokreads_nozero)
+
+# any samples with no reads? No.
+table(colSums(prokreads_nozero) == 0)
+
+# Fix the sample names bc R doesn't like column names that start with a number
+colnames(prokreads_nozero) <- str_replace_all(colnames(prokreads_nozero), pattern = "[X]", "")
+colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
+```
+
+```{r}
+# load KO and Gene ids
+# Read all lines from the file
+lines <- readLines("../data/user_ko.txt")
+
+# Split each line by tab ("\t")
+split_lines <- strsplit(lines, "\t")
+
+# Convert the split lines into a data frame
+gene_ko <- do.call(rbind, lapply(split_lines, function(x) {
+  if (length(x) == 1) {
+    c(x[1], NA)  # If only one column, fill second column with NA
+  } else {
+    x  # Keep both columns
+  }
+}))
+
+# Assign column names
+colnames(gene_ko) <- c("geneID", "KO")
+
+dim(gene_ko)
+unique(gene_ko) %>% dim
+gene_ko$geneID %>% unique %>% length
+
+# Convert to a data frame
+gene_ko <- as.data.frame(gene_ko, stringsAsFactors = FALSE)
+
+# View the resulting data
+print(head(gene_ko))
+
+# Read in the table of the annotations
+ko_info <- read_excel("../data/kegg_data.xlsx", col_names = TRUE, na = "")
+
+# Get rid of the "KO" in the first column
+ko_info$ENTRY <- str_split_i(ko_info$ENTRY, " ", 1)
+
+head(ko_info)
+dim(ko_info)
+
+# How many unique KOs? 4563
+ko_info$KO_ID %>% unique %>% length
+ko_info$ENTRY %>% unique %>% length
+
+# There's too many duplicate rows. 
+ko_info_nodups <- unique(ko_info)
+
+# add the annotation info to the gene_ko documant
+gene_ko_join <- gene_ko %>%
+  left_join(ko_info_nodups, by = c("KO" = "ENTRY"))
+
+# How many genes are annotated? 32,980
+sum(!is.na(gene_ko_join$KO))
+
+# Filter to only include the annotated columns (should end with 32,980 rows)
+gene_ko_annotated <- gene_ko_join[!is.na(gene_ko_join$KO), ]
+
+# It looks like there are some duplicated gene IDs
+gene_ko_annotated$geneID %>% unique %>% length
+
+# Get rid of duplicate geneID's
+unique_gene_ko_annotated<- gene_ko_annotated[!duplicated(gene_ko_annotated$geneID), ]
+dim(unique_gene_ko_annotated)
+
+# Rename the rows 
+rownames(unique_gene_ko_annotated) <- unique_gene_ko_annotated[,"geneID"]
+```
+
+## Phyloseq object
+Start with a phyloseq object jsut with the count data (no annotation information). The annotations aren't needed for the PCAs I want to make. 
+```{r}
+## Make phyloseq object of count-related data 
+idx <- match(colnames(prokreads_nozero), rownames(metadata))
+metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced samples
+
+NUMREADS = otu_table(prokreads_nozero, taxa_are_rows = TRUE)
+META = sample_data(metadata_prok)
+FXN = tax_table(as.matrix(unique_gene_ko_annotated))
+
+ps.prok.annotated <- phyloseq(NUMREADS, META, FXN)
+ps.prok.annotated
+```
+
+## Corncob
+
+I will use corncob to test the hypothesis that functional genes change in abundance between corals visibly affected by SCTLD or not visibly affected by the disease. Knowing that the composition of symbiodiniaceae also impacts the microbiome composition, I am going to control for the effect of symbiont composition. 
+
+I am going to use raw counts of the different genes from Salmon since Corncob models the relative abundances. 
+
+```{r}
+## Set levels
+sample_data(ps.prok.annotated)$Disease_on_colony_when_coring_binary <-
+  factor(sample_data(ps.prok.annotated)$Disease_on_colony_when_coring_binary, 
+         levels = c("Unaffected", "Diseased"))
+
+head(sample_data(ps.prok.annotated)$Disease_on_colony_when_coring_binary, 10) # levels look good
+
+sample_data(ps.prok.annotated)$Zoox_background <- 
+  factor(sample_data(ps.prok.annotated)$Zoox_background, 
+         levels = c("none", "C", "CD", "D"))
+
+head(sample_data(ps.prok.annotated)$Zoox_background, 10) # levels look good
+
+## Test disease on colony when coring and control for symbiont composition
+set.seed(10) # set seed for reproducibility
+prok.da.dis <- differentialTest(formula = ~ Disease_on_colony_when_coring_binary + Zoox_background, 
+                                  phi.formula = ~ Disease_on_colony_when_coring_binary + Zoox_background,
+                                  formula_null = ~ Zoox_background,
+                                  phi.formula_null = ~ Disease_on_colony_when_coring_binary + Zoox_background,
+                                  test = "Wald", boot = FALSE,
+                                  data = ps.prok.annotated,
+                                  fdr_cutoff = 0.05)
+
+plot(prok.da.dis, level = "SYMBOL")
+```
+
+WOW! This resulted in 685 differentially abundant taxa!!! That is kinda a LOT. I would like to be thoughtful in how I represent that data. Maybe I will do the ones that are disease-enriched in one graph, and one that is healthy-enriched in the other graph? I could also plot them all as a heatmap and I DEFINTIELY want to graph them by their BRITE hierarchies. 
+
+Out of curiosity, I am also going to see how many taxa there are with a more stringent p-value cutoff. Save all the data first
+```{r}
+# write a function to extract the corncob results
+extractmods2 <- function(model) {
+  result <- data.frame("Estimate" = model$coefficients[2, 1], 
+                        "Std.Error" = model$coefficients[2, 2], 
+                        "p" = model$coefficients[2, 4])
+  return(result)
+}
+
+# save the output as a list using the above function
+sig.models <- lapply(prok.da.dis$significant_models, extractmods2)
+names(sig.models) <- prok.da.dis$significant_taxa
+
+# save a table of annotations for just the significant genes
+sig.fxnl.genes <- filter(unique_gene_ko_annotated, geneID %in% prok.da.dis$significant_taxa)
+
+# turn the output from a list to a dataframe for ease of saving and manipulating
+sig.models.df <- plyr::ldply(sig.models, data.frame) %>% 
+  left_join(sig.fxnl.genes, by = c(".id" = "geneID"))
+
+### Save these data so you don't have to re-run the model ###
+write.table(sig.models.df, "../data/Corncob_prok_annotated_results_dis.symb_0.05.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+```
+
+How many different genes are there significant at a adjusted p value < 0.001?
+```{r}
+filter(sig.models.df, p < 0.001) #299 genes
+
+sig.models.df$KO %>% length
+sig.models.df$KO %>% unique %>% length
+
+sig.taxa <- sig.models.df$KO %>% unique
+
+write(sig.taxa, file = "sig.taxa.KO.txt")
+```
+
+I need to try to manipulate the data table output so that I can get a table that shows the KEGG Orthology information clearly.
 
