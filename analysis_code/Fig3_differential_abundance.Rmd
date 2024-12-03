@@ -25,6 +25,7 @@ library(dplyr)
 library(tidyr)
 library(readxl)
 library(stringr)
+library(KEGGREST)
 
 # For visualization
 library(corncob)
@@ -561,6 +562,8 @@ write.table(sig.models.df, "../data/Corncob_prok_annotated_results_dis.symb_0.05
 How many different genes are there significant at a adjusted p value < 0.001?
 ```{r}
 filter(sig.models.df, p < 0.001) #299 genes
+filter(sig.models.df, Estimate > 0)
+filter(sig.models.df, Estimate < 0)
 
 sig.models.df$KO %>% length
 sig.models.df$KO %>% unique %>% length
@@ -571,4 +574,162 @@ write(sig.taxa, file = "sig.taxa.KO.txt")
 ```
 
 I need to try to manipulate the data table output so that I can get a table that shows the KEGG Orthology information clearly.
+
+Try looping through a bunch of KO ids. I will loop through all the KO IDs and get them combined. 
+
+```{r}
+# List of KO identifiers
+ko_ids <- readLines("sig.taxa.KO.txt")
+
+ko_ids_testgroup <- c("K09125", "K00950", "K15738", "K07457", "K24163", "K00059")
+
+# Create an empty dataframe to store parsed data for all KO IDs
+parsed_data <- data.frame(KO_ENTRY = character(), 
+                          BRITEhierarchy = character(),
+                          Level2 = character(),
+                          Level3 = character(),
+                          Level4 = character(),
+                          Level5 = character(),
+                          Level6 = character(),
+                          KO = character(),
+                          stringsAsFactors = FALSE)
+
+# Loop through each KO ID
+for (ko_id in ko_ids) {
+  
+  # Retrieve information for the KO
+  ko_info <- keggGet(ko_id)
+  
+  # Note which KO ID you are on
+  print(paste("Processing KO ID: ", ko_id))
+  
+  # Check if the KO ID has BRITE hierarchy data
+  if (!is.null(ko_info[[1]]$BRITE)) {
+    brite <- ko_info[[1]]$BRITE  # Extract the BRITE section
+    
+    # Initialize variables for hierarchy levels
+    brite_hierarchy <- level2 <- level3 <- level4 <- level5 <- level6 <- NA
+    
+    # Process each line in the BRITE section
+    for (line in brite) {
+      
+      # Determine indentation level (number of leading spaces)
+      indentation <- attr(regexpr("^\\s*", line), "match.length")  # Count spaces
+      content <- trimws(line)  # Remove leading/trailing spaces
+      
+      if (indentation == 0) {
+          # Top-level category (Level1)
+          brite_hierarchy <- content
+          level2 <- level3 <- level4 <- level5 <- level6 <- NA  # Reset lower levels
+      } else if (indentation == 1) {
+          # Second-level category (Level2)
+          level2 <- content
+          level3 <- level4 <- level5 <- level6 <- NA  # Reset lower levels
+      } else if (indentation == 2) {
+          # Third-level category (Level3)
+          level3 <- content
+          level4 <- level5 <- level6 <- NA  # Reset lower level
+      } else if (indentation == 3) {
+          # KO entry or Fourth-level category (Level4)
+          if (grepl("^K[0-9]+", content)) {  # Check if it's a KO entry
+            ko <- content
+            parsed_data <- rbind(parsed_data, data.frame(KO_ENTRY = ko_id, 
+                                                         BRITEhierarchy = brite_hierarchy,
+                                                         Level2 = level2,
+                                                         Level3 = level3,
+                                                         Level4 = level4,
+                                                         Level5 = level5,
+                                                         Level6 = level6,
+                                                         KO = ko,
+                                                         stringsAsFactors = FALSE))
+          } else { 
+            level4 <- content
+            level5 <- level6 <- NA
+          }
+      } else if (indentation == 4) {
+          # KO entry or Fifth-level category (Level5)
+          if (grepl("^K[0-9]+", content)) {  # Check if it's a KO entry
+            ko <- content
+            parsed_data <- rbind(parsed_data, data.frame(KO_ENTRY = ko_id, 
+                                                         BRITEhierarchy = brite_hierarchy,
+                                                         Level2 = level2,
+                                                         Level3 = level3,
+                                                         Level4 = level4,
+                                                         Level5 = level5,
+                                                         Level6 = level6,
+                                                         KO = ko,
+                                                         stringsAsFactors = FALSE))
+          } else {
+            level5 <- content
+            level6 <- NA
+          }
+      } else if (indentation == 5) {
+          # KO entry or or Sixth-level category (Level6)
+          if (grepl("^K[0-9]+", content)) {  # Check if it's a KO entry
+            ko <- content
+            parsed_data <- rbind(parsed_data, data.frame(KO_ENTRY = ko_id, 
+                                                         BRITEhierarchy = brite_hierarchy,
+                                                         Level2 = level2,
+                                                         Level3 = level3,
+                                                         Level4 = level4,
+                                                         Level5 = level5,
+                                                         Level6 = level6,
+                                                         KO = ko,
+                                                         stringsAsFactors = FALSE))
+          } else {
+            level6 <- content
+          }
+      } else if (indentation == 6) {
+        # KO entry or or Seventh-level category (Level7)
+          if (grepl("^K[0-9]+", content)) {  # Check if it's a KO entry
+            ko <- content
+            parsed_data <- rbind(parsed_data, data.frame(KO_ENTRY = ko_id, 
+                                                         BRITEhierarchy = brite_hierarchy,
+                                                         Level2 = level2,
+                                                         Level3 = level3,
+                                                         Level4 = level4,
+                                                         Level5 = level5,
+                                                         Level6 = level6,
+                                                         KO = ko,
+                                                         stringsAsFactors = FALSE))
+          } else {
+            ko <- paste("WARNING, doesn't match KO ID", content)
+            parsed_data <- rbind(parsed_data, data.frame(KO_ENTRY = ko_id, 
+                                                         BRITEhierarchy = brite_hierarchy,
+                                                         Level2 = level2,
+                                                         Level3 = level3,
+                                                         Level4 = level4,
+                                                         Level5 = level5,
+                                                         Level6 = level6,
+                                                         KO = ko,
+                                                         stringsAsFactors = FALSE))
+          } 
+      } else {
+          # For unexpected cases, add a catch-all (optional)
+          warning(paste("Unexpected indentation level encountered: ", indentation, "for the following KO: ", ko_id))
+      }
+    }
+  } else {
+    warning(paste("No BRITE data found for KO ID:", ko_id))
+  }
+}
+
+# View the parsed hierarchy
+print(parsed_data)
+
+```
+
+Now, the `parsed_data` data frame is the BRITE hierarchy data for the significant taxa. Ultimately, I just want the KEGG orthology data for each of these KO IDs. 
+
+Then, I will make a data table of the estimates and a heatmap of the corncob results. I will subset only of the KEGG Orthology annotations. Then I will focus on specifically metabolism-based KEGG Orthology annotations since those have an ecological function more than things like "DNA repair" or similar. 
+```{r}
+KEGG_Orthology_sig_ko <- parsed_data %>%
+  filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
+  filter(Level2 == "09100 Metabolism")
+
+KEGG_Orthology_sig_ko$KO_ENTRY %>% unique %>% length
+
+parsed_data$KO_ENTRY %>% unique %>% length
+```
+
 
