@@ -20,9 +20,173 @@ setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
 ## Install necessary packages
 
 ```{r packages, message=FALSE, warning=FALSE, results='hide'}
-# For data wrangling
+library(ggplot2)
+library(dplyr)
+library(readxl)
+library(stringr)
+library(tidyr)
+library(tidyverse)
+theme_set(theme_bw())
+library(ggpubr)
+library(ggalluvial)
+library(scales)
+```
 
-# For visualization
+## Read in data
+```{r}
+# Load metadata
+metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
+rownames(metadata) <- metadata$CoralID
+```
 
+
+# MS FIGURE Alluvial plot - three timepoints
+I want to make an alluvial plot, but with pre-disease, disease at sampling, and disease after sampling, and color it by colony fate. The point of this plot is to demonstrate that we tracked these colonies over a long period of time, but that the corals were sampled only during one time period. 
+
+```{r}
+# Subset only the FLK data first
+FLK_data <- metadata %>%
+  filter(Region == "Lower Keys") %>% # only look at FLK samples
+  filter(Spp == "Ofav") %>% # remove ofra colonies since I didn't analyze their metagenomes
+  filter(CoralID != "N49") %>% # remove the coral colony that wasn't sequenced
+  dplyr::select(CoralID, Disease_before_SP1, Disease_on_colony_when_coring_binary, Disease_after_SP1, Fate_after_SP1) %>%
+  group_by(Disease_before_SP1, Disease_on_colony_when_coring_binary, Disease_after_SP1, Fate_after_SP1) %>%
+  dplyr::summarise(Count = n()) %>%
+  ungroup()
+
+FLK_data$Fate_after_SP1 <- factor(FLK_data$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
+
+addline_format <- function(x,...){
+    gsub("\\(", "\n(", x)
+}
+
+ggplot(FLK_data,
+       aes(axis1 = Disease_before_SP1, axis2 = Disease_on_colony_when_coring_binary, axis3 = Disease_after_SP1,
+           y = Count)) +
+  geom_alluvium(aes(fill = Fate_after_SP1), alpha = 0.9) +
+  geom_stratum() +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  scale_x_discrete(limits = c("Pre-collection condition", "Disease at collection", "Post-collection condition"),
+                   expand = c(0.15, 0.05),
+                   labels = addline_format(c("Pre-collection condition (2019 - Apr 2021)", 
+                        "Disease at collection (May-June 2021)", "Post-collection condition (July 2021 - July 2023)"))) +
+  labs(y = "Number of coral colonies", fill = "Colony Fate") +
+  theme_minimal() +
+  scale_fill_manual(values = c("black", "gray20", "gray70", "gray90"))
+
+#ggsave("../figures/alluvial_plot_fate.pdf", width = 9, height = 5)
+```
+
+Calculate numbers to go in the manuscript
+```{r}
+FLK_data
+
+20/41 # 20 colonies diseased at sampling
+(3+3+4+11)/41 # 21 colonies unaffected at sampling
+
+(20+3+3)/41 # colonies that were diseased at sampling and diseased sometime after SP1 out of total colonies
+
+(3 + 3)/41 # colonies unaffected at sampling, but got disease after SP1 (will be diseased) out of total colonies
+
+4/41 # colonies that recoverd from sctld out of all colonies
+
+11/41 # colonies never impacted during monitoring out of all colonies
+```
+
+# SUPPLEMENT - SYMBIONT COMPOSITION
+I would like to show a figure displaying the abundance of different symbiont composition groupings within the program. 
+I could do this using an overall pie chart. I could also make a stacked bar plot. 
+```{r}
+FLK_metadata <- metadata %>%
+  filter(Region == "Lower Keys") %>% # only look at FLK samples
+  filter(Spp == "Ofav") %>% # remove ofra colonies since I didn't analyze their metagenomes
+  filter(CoralID != "N49") # remove the coral colony that wasn't sequenced
+
+FLK_metadata$Zoox_composition
+
+# There are a mix of zooxanthellae
+ggplot(FLK_metadata, aes(x = "", y = "", fill = Zoox_background)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void()
+
+# one coral has Cladocopium zoox
+ggplot(FLK_metadata, aes(x = "", y = "", fill = Zoox_dominant)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void()
+
+# Zoox_composition
+ggplot(FLK_metadata, aes(x = "", y = "", fill = Zoox_composition)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void()
+
+# can I make a plot of both?
+FLK_zoox <- FLK_metadata %>% 
+  dplyr::select(CoralID, Zoox_composition, Breviolum_density, Cladocopium_density, Durusdinium_density) %>%
+  gather(key = "Symbiont", value = "Symbiont_Density", Breviolum_density:Durusdinium_density)
+
+ggplot(FLK_zoox, aes(x = CoralID, y = Symbiont_Density, fill = Symbiont)) +
+  geom_bar(position = "fill", stat = "identity") +
+  facet_wrap(. ~ Zoox_composition, scales = "free")
+
+ggplot(FLK_zoox, aes(x = CoralID, y = Symbiont_Density, fill = Symbiont)) +
+  geom_bar(position = "stack", stat = "identity") +
+  facet_wrap(. ~ Zoox_composition, scales = "free")
+```
+Shit...what I am learning here is that there are HUGE errors in the metadata columns associated with symbiont composition. What I am going to do next is RECALCULATE THE columns that I would need. 
+I will start by playing around only with the symbiont relevant columns
+Look at this to confirm that I made the correct designation (dominant symbiont and minor symbiont, if applicable)
+```{r}
+zoox_comp <- FLK_metadata %>% 
+  dplyr::select(CoralID, Zoox_dominant, Zoox_background, Total_Symb_Density, Breviolum_density, Cladocopium_density, Durusdinium_density, Zoox_composition) %>%
+  mutate(Symb_density_check = Breviolum_density + Cladocopium_density + Durusdinium_density) %>%
+  mutate(symb_density_match = ifelse(Total_Symb_Density == Symb_density_check, "good", "ERROR")) %>% # Looks like everything was correctly calculated
+  mutate(B_prop = Breviolum_density / Total_Symb_Density) %>%
+  mutate(C_prop = Cladocopium_density / Total_Symb_Density) %>%
+  mutate(D_prop = Durusdinium_density / Total_Symb_Density) %>% 
+  dplyr::select(Zoox_dominant, Zoox_background, B_prop, C_prop, D_prop, Zoox_composition) %>% 
+  mutate(B_main = ifelse(B_prop == 1, "B", "other"))
+zoox_comp
+```
+Everything looks correct now! 
+
+## SUPPLEMENTARY FIGURE
+I want to show the composition of the symbiotic community in these corals. I will do this by using faceting and also showing the overall results. 
+```{r}
+# Pie chart of the different corals and their composition
+pie <- ggplot(FLK_metadata, aes(x = "", y = "", fill = Zoox_composition)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void() +
+  scale_fill_brewer(palette = "Dark2") +
+  theme(legend.position = "bottom")
+
+# can I make a stacked bar plot of the actual symbiont composition?
+FLK_zoox <- FLK_metadata %>% 
+  dplyr::select(CoralID, Zoox_composition, Disease_on_colony_when_coring_binary, Breviolum_density, Cladocopium_density, Durusdinium_density) %>%
+  gather(key = "Symbiont", value = "Symbiont_Density", Breviolum_density:Durusdinium_density)
+
+barplot <- ggplot(FLK_zoox, aes(x = CoralID, y = Symbiont_Density, fill = Symbiont)) +
+  geom_bar(position = "fill", stat = "identity") +
+  facet_wrap(. ~ Disease_on_colony_when_coring_binary + Zoox_composition, scales = "free_x", ncol = 5) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_manual(values = c("gray80", "gray60", "black")) +
+  theme(legend.position = "bottom")
+```
+
+Put the plots together
+```{r}
+ggarrange(pie, barplot, widths = c(1,1.5), labels = c("a.", "b."))
+#ggsave("../figures/zoox_composition.pdf", width = 12, height = 5)
+
+table(FLK_metadata$Zoox_composition)
+
+(5+6+8)/41
+
+table(FLK_metadata$treat_type)
+
+summary(FLK_metadata$Total_treatments_before_coring)
 ```
 

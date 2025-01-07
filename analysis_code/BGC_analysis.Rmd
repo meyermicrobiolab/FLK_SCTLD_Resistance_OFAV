@@ -1,0 +1,139 @@
+---
+title: "BGC_analysis"
+output: html_document
+date: "2024-12-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.retina = 2, fig.path = "../figures/fig-")
+setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
+```
+
+# Setup
+## Install necessary packages
+
+```{r packages, message=FALSE, warning=FALSE, results='hide'}
+# For data wrangling
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(stringr)
+library(KEGGREST)
+
+# For visualization
+library(phyloseq)
+library(randomcoloR)
+library(ggplot2)
+theme_set(theme_bw())
+library(ComplexHeatmap)
+library(circlize)  # For color scaling
+library(RColorBrewer)
+```
+
+# Read in data
+
+## Load raw data 
+
+First read in the RGI data table. Note, the table that came from the RGI program was kinda tough in the first column. So I changed the first column to have just the contig/gene ID, then got rid of the empty columns (Contig, start, stop, orientation). I also got rid of teh SNPs column and predicted_DNA columns. I also just tried saving it as an Excel document to see if it works better. 
+```{r}
+bgc <- read_excel("../data/FLK_prok_coassembly_antismash_BGC.xlsx")
+```
+
+Need to read in the count, taxonomy, and metadata data for each gene. 
+```{r}
+# Load table with count abundances from salmon ("numreads")
+prokreads <- read.table("../data/prok_FLK_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
+prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
+
+# Load metadata
+metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
+rownames(metadata) <- metadata$CoralID
+
+# how many genes are zero across all samples? Like 32k
+table(rowSums(prokreads) == 0)
+
+# remove them
+prokreads_nozero <- prokreads[rowSums(prokreads) != 0, ]
+dim(prokreads_nozero)
+
+# any samples with no reads? No.
+table(colSums(prokreads_nozero) == 0)
+
+# Fix the sample names bc R doesn't like column names that start with a number
+colnames(prokreads_nozero) <- str_replace_all(colnames(prokreads_nozero), pattern = "[X]", "")
+colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
+
+# Read in the taxonomy
+prok_taxa <- read.table("../data/FLK_prok_coassembly_tax_mmseqs2.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
+
+## Subset the metadata
+idx <- match(colnames(prokreads_nozero), rownames(metadata))
+metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced samples
+```
+# Explore
+Explore the results
+
+```{r}
+n <- 30
+colrs <- brewer.pal.info[brewer.pal.info$colorblind == TRUE, ]
+col_vec = unlist(mapply(brewer.pal, colrs$maxcolors, rownames(colrs)))
+col <- sample(col_vec, n)
+
+ggplot(bgc, aes(x = "", fill = Type)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = col)
+
+ggplot(bgc, aes(x = On_contig_edge, fill = Type)) +
+  geom_bar()+
+  scale_fill_manual(values = col)
+```
+
+Let's look at the individual BGCs. They are on full contigs, but all my annotations are on the predicted genes. I will investigate the annotations for the genes from each contig. 
+First, start with some data manipulation of the taxa. 
+```{r}
+prok_contig_taxa <- prok_taxa %>%
+  mutate(Gene = contig) %>% 
+  separate(contig, into = c("base", "contig", "gene_ID" ), sep = "_", remove = FALSE) %>% 
+  mutate(FullContig = paste0(base, "_", contig))
+```
+
+Now that I have the data in a format I like. I will investigate the 3 full BGC taxonomic annotations. 
+
+### Terpene BGC
+The terpene is on contig k127_167047
+```{r}
+terpene_tax <- prok_contig_taxa %>% filter(FullContig == "k127_167047") %>%
+  separate(complete_classification, into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), sep = ";")
+
+ggplot(terpene_tax, aes(x = "", y = n, fill = Family)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void()
+```
+### Opine-like-metallophore BGC
+The metallophore is on contig k127_491492
+This one is interesting. It is a BGC for a zincophore, for harvesting zinc!!!
+```{r}
+metallophore_tax <- prok_contig_taxa %>% filter(FullContig == "k127_491492") %>%
+  separate(complete_classification, into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), sep = ";")
+
+ggplot(metallophore_tax, aes(x = "", y = n, fill = Family)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void()
+```
+### RRE-containing BGC
+The RRE BGC is on contig k127_3016148
+This one is interesting. It is a BGC for a zincophore, for harvesting zinc!!!
+```{r}
+RRE_tax <- prok_contig_taxa %>% filter(FullContig == "k127_3016148") %>%
+  separate(complete_classification, into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), sep = ";")
+
+ggplot(RRE_tax, aes(x = "", y = n, fill = Family)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  theme_void()
+```
+
+
+
