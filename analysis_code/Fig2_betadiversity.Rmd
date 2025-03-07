@@ -1163,7 +1163,7 @@ ps.prok.euc_diss <- vegdist(ps.prok.clr_otu, method = "euclidean")
 I want to investigate which variables are explaining differences in the microbiome. These are the variables of interest:
 - colony fate
 - disease at sampling
-- symbiont composition (NEW AS OF 1/4/2024)
+- symbiont composition (NEW AS OF 1/4/2024, UPDATED as of Mid-Jan. Carly Dennison gave me updated details. New column of interest with correct categories is "Zoox_composition_New")
 - clone
 - reef
 ```{r}
@@ -1176,7 +1176,7 @@ adonis2(formula = ps.prok.euc_diss ~ Fate_after_SP1, data = ps.prok.clr_meta, pe
 
 # zoox (symbiont) composition
 set.seed(10)
-adonis2(formula = ps.prok.euc_diss ~ Zoox_composition, data = ps.prok.clr_meta, permutations = 999) 
+adonis2(formula = ps.prok.euc_diss ~ Zoox_composition_New, data = ps.prok.clr_meta, permutations = 999) 
 
 # disease at sampling
 set.seed(10)
@@ -1193,17 +1193,17 @@ adonis2(formula = ps.prok.euc_diss ~ Location, data = ps.prok.clr_meta, permutat
 # Do the adonis2 using strata to control for symbiodiniaceae composition since I am interested in controlling for this effect. I am most interested in disease, but with symbiont composition controlling a huge portion of the community, it is difficult to disentangle
 # Code for this found at https://github.com/vegandevs/vegan/discussions/600 
 set.seed(10)
-stratatest <- with(ps.prok.clr_meta, how(nperm = 999, blocks = Zoox_composition))
+stratatest <- with(ps.prok.clr_meta, how(nperm = 999, blocks = Zoox_composition_New))
 adonis2(ps.prok.euc_diss ~ Disease_on_colony_when_coring_binary, data = ps.prok.clr_meta, permutations = stratatest) 
 
 # fate while controlling for symbiont composition
 set.seed(10)
-stratatest <- with(ps.prok.clr_meta, how(nperm = 999, blocks = Zoox_composition))
+stratatest <- with(ps.prok.clr_meta, how(nperm = 999, blocks = Zoox_composition_New))
 adonis2(ps.prok.euc_diss ~ Fate_after_SP1, data = ps.prok.clr_meta, permutations = stratatest) 
 
 # Also do a pairwise permanova while controlling for symbiont composition since I am also interested in between-group permanova comparisons. 
 set.seed(10)
-pairwise.prok.Fate.zoox <- pairwise.adonis2(ps.prok.euc_diss ~ Fate_after_SP1/Zoox_composition, data = ps.prok.clr_meta, strata = 'Zoox_composition') 
+pairwise.prok.Fate.zoox <- pairwise.adonis2(ps.prok.euc_diss ~ Fate_after_SP1/Zoox_composition_New, data = ps.prok.clr_meta, strata = 'Zoox_composition_New') 
 print(pairwise.prok.Fate.zoox)
 ```
 
@@ -1217,17 +1217,17 @@ sample_data(ps.prok_clr)$Disease_on_colony_when_coring_binary <-
 # plot PCA
 disease_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
                 color="Disease_on_colony_when_coring_binary", 
-                shape ="Zoox_composition") +
+                shape ="Zoox_composition_New") +
   geom_point(size = 4) +
   coord_fixed() +
   labs(color = "Disease at sampling", shape = "Symbiodiniaceae composition") +
   scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  scale_shape_manual(values = c(16, 15, 17, 18, 3))
+  scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
 
 disease_pca
 
 disease_pca_2 <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                shape = "Zoox_composition") +
+                shape = "Zoox_composition_New") +
   coord_fixed()
 
 disease_pca_2$layers
@@ -1235,10 +1235,10 @@ disease_pca_2$layers
 disease_pca_2$layers <- disease_pca_2$layers[-1]
 
 disease_pca_final <- disease_pca_2 + 
-  geom_point(size=4, alpha = 0.9, aes(fill = Disease_on_colony_when_coring_binary)) +
-  scale_shape_manual(values = c(22, 24, 23, 25, 21)) +
-  scale_fill_manual(values = c("#0C7BDC", "#FFC20A")) +
-  labs(fill = "Disease at sampling", shape = "Symbiodiniaceae composition")
+  geom_point(size=4, alpha = 0.9, aes(color = Disease_on_colony_when_coring_binary)) +
+  scale_shape_manual(values = c(16, 15, 17, 18, 3, 8)) +
+  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
+  labs(color = "Disease at sampling", shape = "Symbiodiniaceae composition")
 disease_pca_final
 ```
 
@@ -1276,14 +1276,14 @@ betadisp_disease <- ggplot(disp.disease.meta, aes(x = Disease_on_colony_when_cor
   geom_boxplot(lwd = 0.5, outlier.shape = NA) +
   stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
   geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(fill = Disease_on_colony_when_coring_binary, 
-                  shape = Zoox_composition), 
+              aes(color = Disease_on_colony_when_coring_binary, 
+                  shape = Zoox_composition_New), 
               size = 4, alpha = 0.9) +
   ylab("Distance to Centroid") +
   theme(legend.text.align = 0) +
-  labs(fill = "Disease at sampling", x = "Disease at sampling", shape = "Symbiodiniaceae composition") +
-  scale_fill_manual(values = c("#0C7BDC", "#FFC20A")) +
-  scale_shape_manual(values = c(22, 24, 23, 25, 21))
+  labs(color = "Disease at sampling", x = "Disease at sampling", shape = "Symbiodiniaceae composition") +
+  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
+  scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
 
 betadisp_disease
 ```
@@ -1291,7 +1291,7 @@ betadisp_disease
 ### Figure - Disease at sampling
 ```{r}
 ggarrange(disease_pca_final, betadisp_disease, labels = c("a.", "b."), common.legend = TRUE, legend = "right", widths = c(2,1))
-ggsave("../figures/PCA_disease_at_sampling.pdf", width = 10, height = 5)
+ggsave("../figures/PCA_disease_at_sampling_ZooxNew.pdf", width = 10, height = 5)
 ```
 
 ## Fate - prok
@@ -1370,13 +1370,17 @@ ggsave("../figures/PCA_fate.pdf", width = 11, height = 5)
 ```
 
 ## Symbiodiniaceae - zoox
+
+Note: Make sure to use the brand new zooxanthellae groupings. These are from Carly Dennison as of mid-January. 
+It is the `Zoox_composition_New` grouping.
+
 ### PCA symbiont
 ```{r}
 sample_data(ps.prok_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.prok_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
 
 # plot PCA with labels to see which corals are farther apart
 plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                color="Zoox_composition", shape = "Disease_on_colony_when_coring_binary") +
+                color="Zoox_composition_New", shape = "Disease_on_colony_when_coring_binary") +
   geom_point(size = 4) +
   coord_fixed() +
   scale_color_brewer(palette = "Dark2") +
@@ -1385,7 +1389,7 @@ plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples",
 
 # without the labels - want transparency
 symbiont_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                color="Zoox_composition", shape = "Disease_on_colony_when_coring_binary") +
+                color="Zoox_composition_New", shape = "Disease_on_colony_when_coring_binary") +
   coord_fixed() +
   scale_color_brewer(palette = "Dark2") +
   labs(color = "Symbiodiniaceae composition", shape = "Disease at sampling")
@@ -1403,7 +1407,7 @@ Note that for the symbiodiniaceae results, sample 3421 is the one colony with a 
 ```{r}
 # Run betadisper function from vegan
 # Hypothesis - Colony fate explains the variability in the functional microbiome
-disp.symbiont <- betadisper(ps.prok.euc_diss, ps.prok.clr_meta$Zoox_composition)
+disp.symbiont <- betadisper(ps.prok.euc_diss, ps.prok.clr_meta$Zoox_composition_New)
 
 # save the distances and combine with metadata
 distances <- disp.symbiont$distances
@@ -1413,35 +1417,36 @@ disp.symbiont.meta <- cbind(distances, ps.prok.clr_meta)
 disp.symbiont.meta$Disease_on_colony_when_coring_binary <-
   factor(disp.symbiont.meta$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
 
-# Remove sample 3421 (D symbionts) because there is only one sample in that group
-disp.symbiont.meta.no3421 <- filter(disp.symbiont.meta, CoralID != "3421")
+# Remove sample 3421 (BD symbionts) and 689 (CD symbionts) because there is only one sample in each grouping
+disp.symbiont.meta.no3421or689 <- filter(disp.symbiont.meta, CoralID != "3421")
+disp.symbiont.meta.no3421or689 <- filter(disp.symbiont.meta.no3421or689, CoralID != "689")
 
 # Are the data normally distributed in each group?
-ggqqplot(disp.symbiont.meta.no3421$distances) # normal looking
-shapiro.test(disp.symbiont.meta.no3421$distances) # data normal
+ggqqplot(disp.symbiont.meta.no3421or689$distances) # normal looking
+shapiro.test(disp.symbiont.meta.no3421or689$distances) # data normal
 
 # Do a Kruskal-Wallis test (nonparametric) to see if there are significant differences in the dispersion by fate
 # First I need to remove sample 3421 since there is only one coral in that group. It would likely skew the results. 
 
 # My question: Is there a significant difference in dispersion between fate groups?
-kruskal.test(distances ~ Zoox_composition, data = disp.symbiont.meta.no3421)
+kruskal.test(distances ~ Zoox_composition_New, data = disp.symbiont.meta.no3421or689)
 
 #Pairwise tests using the Wilcoxon rank sum test with Benjamini-Hochberg correction for multiple testing, which creates an adjusted P value:
-pairwise.wilcox.test(disp.symbiont.meta.no3421$distances, disp.symbiont.meta.no3421$Zoox_composition, p.adjust.method = "BH") 
+pairwise.wilcox.test(disp.symbiont.meta.no3421or689$distances, disp.symbiont.meta.no3421or689$Zoox_composition_New, p.adjust.method = "BH") 
 
 # NEED TO DO AN ANOVA BECAUSE DATA ARE NORMAL
-zoox_aov <- aov(distances ~ Zoox_composition, data = disp.symbiont.meta.no3421)
+zoox_aov <- aov(distances ~ Zoox_composition_New, data = disp.symbiont.meta.no3421)
 
 summary(zoox_aov)
 
 TukeyHSD(zoox_aov)
 
 # Plot the results
-betadisp_symbiont <- ggplot(disp.symbiont.meta.no3421, aes(x = Zoox_composition, y = distances)) +
+betadisp_symbiont <- ggplot(disp.symbiont.meta.no3421or689, aes(x = Zoox_composition_New, y = distances)) +
   geom_boxplot(lwd = 0.5, outlier.shape = NA) +
   stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
   geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Zoox_composition, shape = Disease_on_colony_when_coring_binary), 
+              aes(color = Zoox_composition_New, shape = Disease_on_colony_when_coring_binary), 
               size = 4, alpha = 0.9) +
   ylab("Distance to Centroid") +
   theme(legend.text.align = 0) +
@@ -1452,8 +1457,8 @@ betadisp_symbiont
 ```
 ### Figure - Symbiodiniaceae
 ```{r}
-ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("a.", "b."), common.legend = TRUE, legend = "right")
-ggsave("../figures/PCA_zoox_composition.pdf", width = 12, height = 5)
+ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("c.", "d."), common.legend = TRUE, legend = "right")
+ggsave("../figures/PCA_zoox_composition_ZooxNew.pdf", width = 12, height = 5)
 ```
 
 ## Clone & Location

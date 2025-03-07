@@ -34,6 +34,7 @@ library(phyloseq)
 library(randomcoloR)
 library(ggplot2)
 theme_set(theme_bw())
+library(patchwork)
 ```
 
 # Read in data
@@ -516,6 +517,7 @@ I am going to use raw counts of the different genes from Salmon since Corncob mo
 
 For the symbiont composition, I will use the new column called `Zoox_composition`, which doesn't have errors. DO NOT USE the Zoox_background column anymore. There are errors in it. 
 
+3/2/25 - I UPDATED THIS with the new zoox composition groupings. This way the anlaysis reflects the actual symbiont groupings.  
 ```{r}
 ## Set levels
 sample_data(ps.prok.annotated)$Disease_on_colony_when_coring_binary <-
@@ -524,18 +526,18 @@ sample_data(ps.prok.annotated)$Disease_on_colony_when_coring_binary <-
 
 head(sample_data(ps.prok.annotated)$Disease_on_colony_when_coring_binary, 10) # levels look good
 
-sample_data(ps.prok.annotated)$Zoox_composition <- 
-  factor(sample_data(ps.prok.annotated)$Zoox_composition, 
-         levels = c("B", "B_dom_plus_C", "B_dom_plus_CD", "B_dom_plus_D", "D"))
+sample_data(ps.prok.annotated)$Zoox_composition_New <- 
+  factor(sample_data(ps.prok.annotated)$Zoox_composition_New, 
+         levels = c("B", "B_dom_plus_C", "B_dom_plus_CD", "B_dom_plus_D", "BD", "CD"))
 
-head(sample_data(ps.prok.annotated)$Zoox_composition, 10) # levels look good
+head(sample_data(ps.prok.annotated)$Zoox_composition_New, 10) # levels look good
 
 ## Test disease on colony when coring and control for symbiont composition
 set.seed(10) # set seed for reproducibility
-prok.da.dis <- differentialTest(formula = ~ Disease_on_colony_when_coring_binary + Zoox_composition, 
-                                  phi.formula = ~ Disease_on_colony_when_coring_binary + Zoox_composition,
-                                  formula_null = ~ Zoox_composition,
-                                  phi.formula_null = ~ Disease_on_colony_when_coring_binary + Zoox_composition,
+prok.da.dis <- differentialTest(formula = ~ Disease_on_colony_when_coring_binary + Zoox_composition_New, 
+                                  phi.formula = ~ Disease_on_colony_when_coring_binary + Zoox_composition_New,
+                                  formula_null = ~ Zoox_composition_New,
+                                  phi.formula_null = ~ Disease_on_colony_when_coring_binary + Zoox_composition_New,
                                   test = "Wald", boot = FALSE,
                                   data = ps.prok.annotated,
                                   fdr_cutoff = 0.05)
@@ -544,7 +546,7 @@ plot(prok.da.dis, level = "SYMBOL")
 prok.da.dis$significant_taxa
 ```
 
-WOW! This resulted in 685 differentially abundant taxa!!! That is kinda a LOT. I would like to be thoughtful in how I represent that data. Maybe I will do the ones that are disease-enriched in one graph, and one that is healthy-enriched in the other graph? I could also plot them all as a heatmap and I DEFINTIELY want to graph them by their BRITE hierarchies. 
+WOW! This resulted in 328-ish differentially abundant taxa!!! That is kinda a LOT, but not as many as before, when it was 685 from the previous analysis that accounted for differences due to the old zoox composition groupings.  I would like to be thoughtful in how I represent that data. Maybe I will do the ones that are disease-enriched in one graph, and one that is healthy-enriched in the other graph? I could also plot them all as a heatmap and I DEFINTIELY want to graph them by their BRITE hierarchies. 
 
 Out of curiosity, I am also going to see how many taxa there are with a more stringent p-value cutoff. Save all the data first
 ```{r}
@@ -569,19 +571,19 @@ sig.models.df <- plyr::ldply(sig.models, data.frame) %>%
   left_join(prok_taxa, by = c(".id" = "contig"))
 
 ### Save these data so you don't have to re-run the model ###
-write.table(sig.models.df, "../data/Corncob_prok_annotated_results_dis.symb.composition_0.05.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+write.table(sig.models.df, "../data/Corncob_prok_annotated_results_03.02.25.txt", sep="\t", row.names = FALSE, col.names = TRUE)
 ```
 
 ## Process output
 
 How many different genes are there significant at a adjusted p value < 0.001?
 ```{r}
-filter(sig.models.df, p < 0.001) #168 genes
-filter(sig.models.df, Estimate > 0) #50 gnes
-filter(sig.models.df, Estimate < 0) #267 genes
+filter(sig.models.df, p < 0.001) #181 genes
+filter(sig.models.df, Estimate > 0) #15 gnes
+filter(sig.models.df, Estimate < 0) #312 genes
 
-sig.models.df$KO %>% length
-sig.models.df$KO %>% unique %>% length
+sig.models.df$KO %>% length #327
+sig.models.df$KO %>% unique %>% length #299
 
 sig.taxa <- sig.models.df$KO %>% unique
 
@@ -746,20 +748,20 @@ parsed_data %>%
   dplyr::select(BRITEhierarchy) %>%
   unique
  
-KEGG_Orthology_sig_ko$KO_ENTRY %>% unique %>% length
+KEGG_Orthology_sig_ko$KO %>% unique %>% length
 
-parsed_data$KO_ENTRY %>% unique %>% length
+parsed_data$KO %>% unique %>% length
 
 # For each of the KO identifiers, match the gene ID and the associated abundance to that KO. There are multiple duplicate annotations for each KO, and duplicate genes that match a KO, so it is going to be a bit of an "all against all" match up. I also want to add the taxonomy results. 
 sig.ko.tax.data <- sig.models.df %>%
   dplyr::select(.id:NAME, DBLINKS, annotation, complete_classification) %>%
   full_join(parsed_data, by = "KO", relationship = "many-to-many")
 
-# Check that there are still just 317 unique genes
+# Check that there are still just 327 unique genes
 sig.ko.tax.data$.id %>% unique %>% length
 
 ### Save these data so you have the fully parsed out annotations for each gene (there will be more rows than columns) ###
-write.table(sig.ko.tax.data, "../data/Corncob_prok_annotated_results_dis.symb.composition_ANNOTATIONS_0.05.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+write.table(sig.ko.tax.data, "../data/Corncob_prok_annotated_results_03.02.25_ANNOTATIONS.txt", sep="\t", row.names = FALSE, col.names = TRUE)
 ```
 
 # Visualize the corncob results
@@ -785,7 +787,7 @@ sig.ko.tax.data %>%
   unique %>% 
   nrow
 
-# How many KO ids have a Metabolism function? 135
+# How many KO ids have a Metabolism function? 131
 sig.ko.tax.data %>% 
   filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
   filter(Level2 == "09100 Metabolism") %>%
@@ -799,16 +801,19 @@ sig.metab.genes <- sig.ko.tax.data %>%
   filter(Level2 == "09100 Metabolism")
 
 # Make a graph of metabolism genes
+# disease associated
 ggplot(filter(sig.metab.genes, Estimate > 0), aes(x = Level4, y = Estimate)) +
   geom_point() +
   coord_flip() +
   facet_grid(Level3 ~ ., space = "free", scales = "free_y")
 
+# healthy associated
 ggplot(filter(sig.metab.genes, Estimate < 0), aes(x = Level4, y = Estimate)) +
   geom_point() +
   coord_flip() +
   facet_grid(Level3 ~ ., space = "free", scales = "free_y")
 
+# all together
 ggplot(sig.metab.genes, aes(x = Level4, y = Estimate)) +
   geom_point() +
   coord_flip() +
@@ -829,14 +834,14 @@ ggplot(sig.metab.genes, aes(x = Level4, y = Estimate)) +
   labs(y = "Differential Abundance Coefficient", x = "KEGG Orthology Metabolism Group") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
-# How many disease-assoc genes with metabolism annotations? 196
+# How many disease-assoc genes with metabolism annotations? 11
 sig.metab.genes %>% 
   filter(Estimate > 0) %>% 
   dplyr::select(.id) %>%
   unique %>%
   nrow
 
-# How many healthy-assoc genes with metabolism annotations? 114
+# How many healthy-assoc genes with metabolism annotations? 137
 sig.metab.genes %>% 
   filter(Estimate < 0) %>% 
   dplyr::select(.id) %>%
@@ -906,7 +911,7 @@ ggplot(sig.metab.genes.subsetforgraph, aes(x = Estimate, y = Level4)) +
   labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology Metabolism Group") +  
   geom_vline(xintercept = 0, linetype = "dashed")
 
-# What about cofactors and vitamins? NOT MY FAVE
+# What about cofactors and vitamins? NOT MY FAVE - I DON"T THINK THIS ADDS MUCH
 sig.metab.genes.vitamins <- sig.metab.genes %>%
   filter(Level3 %in% c("09108 Metabolism of cofactors and vitamins")) %>%
   mutate(DiseaseHealth = ifelse(Estimate > 0, "Disease", "Healthy"))
@@ -918,7 +923,7 @@ ggplot(sig.metab.genes.vitamins, aes(x = Estimate, y = Level4)) +
   labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology Metabolism Group") +  
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 ```
-I like the final graph...People might also be interested in the cofactors and vitamins. 
+I like the final graph (not the vitamin one)
 Things to mention in the paper
 - number of different genes that were healthy or disease associated
 - specific names of genes that were part of metabolizing natural or bioactive products
@@ -951,10 +956,10 @@ metab.genes.id <- sig.metab.genes$.id %>% unique
 # Subset the data to exclude the metab.genes.id values
 sig.nonmetab.genes <- sig.ko.tax.data[!sig.ko.tax.data$.id %in% metab.genes.id, ]
 
-# Double check how many unique genes in the new data frame (169)
+# Double check how many unique genes in the new data frame (179)
 sig.nonmetab.genes$.id %>% unique %>% length
 
-# Subset the KO data since it includes all 169 genes
+# Subset the KO data since it includes all 179 genes
 sig.nonmetab.genes.KO <- sig.nonmetab.genes %>% 
   filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]")
 
@@ -964,16 +969,20 @@ sig.nonmetab.genes.KO$Level3 %>% factor %>% levels
 
 # Try out a couple ways to graph the data
 # Make a graph of not metabolism genes
+
+# disease associated
 ggplot(filter(sig.nonmetab.genes.KO, Estimate > 0), aes(x = Level4, y = Estimate)) +
   geom_point() +
   coord_flip() +
   facet_grid(Level2 + Level3 ~ ., space = "free", scales = "free_y")
 
+# healthy associated
 ggplot(filter(sig.nonmetab.genes.KO, Estimate < 0), aes(x = Level4, y = Estimate)) +
   geom_point() +
   coord_flip() +
   facet_grid(Level2 + Level3 ~ ., space = "free", scales = "free_y")
 
+# all genes
 ggplot(sig.nonmetab.genes.KO, aes(x = Level4, y = Estimate)) +
   geom_point() +
   coord_flip() +
@@ -994,14 +1003,14 @@ ggplot(sig.nonmetab.genes.KO, aes(x = Level4, y = Estimate)) +
   labs(y = "Differential Abundance Coefficient", x = "KEGG Orthology Metabolism Group") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
-# How many disease-assoc genes with metabolism annotations? 237
+# How many disease-assoc genes with metabolism annotations? 4
 sig.nonmetab.genes.KO %>% 
   filter(Estimate > 0) %>% 
   dplyr::select(.id) %>%
   unique %>%
   nrow
 
-# How many healthy-assoc genes with metabolism annotations? 138
+# How many healthy-assoc genes with metabolism annotations? 175
 sig.nonmetab.genes.KO %>% 
   filter(Estimate < 0) %>% 
   dplyr::select(.id) %>%
@@ -1022,13 +1031,17 @@ print(summary_table_nonmetab)
 
 Rather, i'd like to make a graph, without the protein families: genetic informatino processing, or unclassified: metabolism groups, and poorly characterized grous since they dont have genes that have more r less DA genes in disease or healthy corals. 
 
+I also don't really want to focus on unclassified proteins. 
+
 ```{r}
 sig.nonmetab.genes.KO.trimmed <- sig.nonmetab.genes.KO %>%
   filter(Level3 != "09182 Protein families: genetic information processing") %>%
   filter(Level3 != "09191 Unclassified: metabolism") %>%
+  filter(Level3 != "09192 Unclassified: genetic information processing") %>%
+  filter(Level3 != "09193 Unclassified: signaling and cellular processes") %>%
   filter(Level3 != "09194 Poorly characterized")
 
-# How many genes did I lose out of the remaining 169? 120/169 (lost 49 genes)
+# How many genes did I lose out of the remaining 179? 116/179 (lost 63 genes)
 sig.nonmetab.genes.KO.trimmed$.id %>% unique %>% length
 
 ggplot(sig.nonmetab.genes.KO.trimmed, aes(x = Level4, y = Estimate)) +
@@ -1039,16 +1052,16 @@ ggplot(sig.nonmetab.genes.KO.trimmed, aes(x = Level4, y = Estimate)) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 ```
 
-Many of the differentially abundant genes that I would hypothesize are playing a role in microbial-based disease susceptibility or resilience are in the Environmental Information Processing, Cellular processes, Drug resistance, and protein families, signalling and cellular processes groups. I will make a graph with just those categories. 
+Many of the differentially abundant genes that I would hypothesize are playing a role in microbial-based disease susceptibility or resilience are in the Environmental Information Processing, Cellular processes, Drug resistance, and protein families, signalling and cellular processes groups. I will make a graph with just those categories. I will ignore the human disease ones because I anticipate those are relevant to human pathogens, which I don't think would be abundant on the reefs. 
 
 ```{r}
 sig.nonmetab.genes.KO.subsetforgraph <- sig.nonmetab.genes.KO %>%
   filter(Level3 %in% c("09131 Membrane transport",
                        "09132 Signal transduction", 
-                       "09141 Transport and catabolism",
                        "09143 Cell growth and death", 
                        "09145 Cellular community - prokaryotes",
                        "09175 Drug resistance: antimicrobial",
+                       "09176 Drug resistance: antineoplastic",
                        "09183 Protein families: signaling and cellular processes"))
 
 ggplot(sig.nonmetab.genes.KO.subsetforgraph, aes(x = Level4, y = Estimate)) +
@@ -1081,18 +1094,18 @@ ggplot(sig.nonmetab.genes.KO.subsetforgraph_2, aes(x = NAME, y = Estimate)) +
   labs(y = "Differential Abundance Coefficient", x = "Gene") +  
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
-# How many genes and KOs are reflected in this figure?
+# How many genes and KOs are reflected in this figure? 28
 sig.nonmetab.genes.KO.subsetforgraph_2 %>% 
   dplyr::select(.id) %>%
   unique %>%
   nrow
 
-sig.nonmetab.genes.KO.subsetforgraph_2 %>% 
+sig.nonmetab.genes.KO.subsetforgraph_2 %>%  #24
   dplyr::select(KO) %>%
   unique %>%
   nrow
 
-## POTENTIAL MANUSCRIPT FIGURE
+## POTENTIAL MANUSCRIPT FIGURE - Maybe keep the transporters for now?
 ggplot(sig.nonmetab.genes.KO.subsetforgraph, aes(x = Estimate, y = Level4)) +
   geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
   geom_point(alpha = 0.7) +
@@ -1141,10 +1154,10 @@ b <- ggplot(sig.nonmetab.genes.KO, aes(x = Estimate, y = Level4)) +
   geom_vline(xintercept = 0, linetype = "dashed")
 
 a
-ggsave("../figures/DA_metabolism_genes.pdf", width = 6, height = 11)
+ggsave("../figures/DA_metabolism_genes_03.02.25.pdf", width = 6, height = 11)
 
 b
-ggsave("../figures/DA_non-metabolism_genes.pdf", width = 6, height = 11)
+ggsave("../figures/DA_non-metabolism_genes_03.02.25.pdf", width = 6, height = 11)
 ```
 
 ## Summary tables
@@ -1182,7 +1195,9 @@ c <- ggplot(sig.metab.genes.subsetforgraph.tax, aes(x = Estimate, y = Level4)) +
   facet_grid(Level3 ~ ., space = "free", scales = "free_y") +
   labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology") +  
   geom_vline(xintercept = 0, linetype = "dashed") +
-  scale_color_manual(values = c("#CC6677", "#AA4499", "#332288"))
+  xlim(-5, 2) +
+  scale_color_manual(values = c("#117733", "#CC6677", "#AA4499", "#332288"))
+c
 
 # Non-metabolism genes subset
 d <- ggplot(sig.nonmetab.genes.KO.subsetforgraph.tax, aes(x = Estimate, y = Level4)) +
@@ -1191,10 +1206,12 @@ d <- ggplot(sig.nonmetab.genes.KO.subsetforgraph.tax, aes(x = Estimate, y = Leve
   facet_grid(Level2 + Level3 ~ ., space = "free", scales = "free_y") +
   labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology") +  
   geom_vline(xintercept = 0, linetype = "dashed") +
-    scale_color_manual(values = c("#CC6677", "#117733", "#AA4499", "#332288", "#88CCEE"))
+  xlim(-5, 2) +
+  scale_color_manual(values = c("#CC6677","#AA4499", "#332288", "#88CCEE" ))
+d
 
 wrap_plots(c,d, nrow = 2, heights = c(1,1.3), axis_titles = "collect")
-ggsave("../figures/DA_MainFig_genes.pdf", width = 8, height = 7)
+ggsave("../figures/DA_MainFig_genes_03.02.25.pdf", width = 8, height = 7)
 ```
 
 
@@ -1203,7 +1220,7 @@ ggsave("../figures/DA_MainFig_genes.pdf", width = 8, height = 7)
 sig.metab.genes.subsetforgraph.tax
 sig.nonmetab.genes.KO.subsetforgraph.tax
 
-write.table(sig.metab.genes.subsetforgraph.tax, "../data/DA_MainFig_Gene_Information_a.txt", sep="\t", row.names = FALSE, col.names = TRUE)
-write.table(sig.nonmetab.genes.KO.subsetforgraph.tax, "../data/DA_MainFig_Gene_Information_b.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+write.table(sig.metab.genes.subsetforgraph.tax, "../data/DA_MainFig_Gene_Information_a_03.02.25.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+write.table(sig.nonmetab.genes.KO.subsetforgraph.tax, "../data/DA_MainFig_Gene_Information_b_03.02.25.txt", sep="\t", row.names = FALSE, col.names = TRUE)
 ```
 

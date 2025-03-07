@@ -450,6 +450,7 @@ rest.mech <- ps.amr.taxfix %>%
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   labs(x = "Coral Colony ID", fill = "Resistance Mechanism")
 
+tax_table(ps.amr.taxfix)[,1] %>% unique
 ```
 
 ### AMR Gene Family
@@ -512,6 +513,9 @@ amrfamilymatches <- filter(as.data.frame(amr.ps.new), AMR_Gene_Family_ID %in% c(
 # Get unique combinations of col1 and col2
 unique_combinations <- unique(amrfamilymatches[c("AMR_Gene_Family", "AMR_Gene_Family_ID")])
 print(unique_combinations)
+
+# How many gene families are there? 437
+tax_table(ps.genefam)[,1] %>% unique
 ```
 
 ### Supp Figure - Graphs together
@@ -608,6 +612,10 @@ bl.new <- betalactamases %>%
 #Resistance_Mechanism, AMR_Gene_Family, 
 bl.new %>% head
 
+# How many total gene families and total beta lactamases
+bl.new[,1] %>% unique %>% length
+bl.new %>% dim()
+
 rownames(bl.new) <- bl.new[,3]
 
 prokreads_nozero$Genes <- NULL
@@ -632,7 +640,7 @@ sample_data(bl.psobj.agg)$Disease_on_colony_when_coring_binary <- factor(sample_
                                                                           levels = c("Unaffected", "Diseased"))
 
 # Visualize the amr gene families, using the ID, since it is shorter. I can match up the actual name later
-betalactamases <- bl.psobj.agg %>%
+blactams <- bl.psobj.agg %>%
   comp_barplot(tax_level = "AMR_Gene_Family", 
                other_name = "Other beta-Lactamase gene family", # set custom name for the "other" category
                facet_by = "Disease_on_colony_when_coring_binary", 
@@ -641,7 +649,7 @@ betalactamases <- bl.psobj.agg %>%
   labs(x = "Coral Colony ID", y = "Relative Abundance", fill = "AMR Gene Family") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
-betalactamases
+blactams
 
 ```
 
@@ -898,7 +906,7 @@ I would like to put all the beta-lactamase genes together
 ```{r}
 ggarrange(ggarrange(ggarrange(treatments, richness, ncol = 2, common.legend = TRUE, labels = c("a.", "b."), legend = "bottom"), 
           betalactam.tax, widths = c(1.5, 1), labels = c("", "c.")), 
-          betalactamases, nrow = 2, labels = c("", "d."))
+          blactams, nrow = 2, labels = c("", "d."))
 
 ggsave("../figures/AMR_beta-lactamase.pdf", width = 13, height = 9)
 ```
