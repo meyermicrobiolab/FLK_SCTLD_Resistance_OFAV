@@ -19,6 +19,7 @@ library(tidyr)
 library(readxl)
 library(stringr)
 library(KEGGREST)
+library(kableExtra)
 
 # For visualization
 library(phyloseq)
@@ -26,8 +27,10 @@ library(randomcoloR)
 library(ggplot2)
 theme_set(theme_bw())
 library(ComplexHeatmap)
+library(pheatmap); packageVersion("pheatmap")
 library(circlize)  # For color scaling
 library(RColorBrewer)
+library(pals)
 ```
 
 # Read in data
@@ -36,7 +39,17 @@ library(RColorBrewer)
 
 First read in the RGI data table. Note, the table that came from the RGI program was kinda tough in the first column. So I changed the first column to have just the contig/gene ID, then got rid of the empty columns (Contig, start, stop, orientation). I also got rid of teh SNPs column and predicted_DNA columns. I also just tried saving it as an Excel document to see if it works better. 
 ```{r}
-bgc <- read_excel("../data/FLK_prok_coassembly_antismash_BGC.xlsx")
+bgc <- read_excel("../data/FLK_prok_coassembly_antismash_BGC.xlsx", na = "NA")
+
+antibac <- read.delim("../data/FLK_prok_coassembly_BGC_antimicro_mean.tsv", sep = "\t", row.names = 1)
+
+# Fix the column names to only extract the name of the sample
+colnames(antibac) <- str_split_i(str_split_i(colnames(antibac), "[.]", 3), "_", 1)
+
+antibac_rpkm <- read.delim("../data/FLK_prok_coassembly_BGC_antimicro_rpkm.tsv", sep = "\t", row.names = 1)
+
+# Fix the column names to only extract the name of the sample
+colnames(antibac_rpkm) <- str_split_i(str_split_i(colnames(antibac_rpkm), "[.]", 3), "_", 1)
 ```
 
 Need to read in the count, taxonomy, and metadata data for each gene. 
@@ -46,7 +59,7 @@ prokreads <- read.table("../data/prok_FLK_coassembly_salmon_quant_all_NumReads.t
 prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
 
 # Load metadata
-metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
+metadata <- as.data.frame(read_excel("../data/RRC_sample_CoreSiteData_v10_RRCCoreData_SP1.xlsx", na = "NA"))
 rownames(metadata) <- metadata$CoralID
 
 # how many genes are zero across all samples? Like 32k
@@ -79,61 +92,323 @@ colrs <- brewer.pal.info[brewer.pal.info$colorblind == TRUE, ]
 col_vec = unlist(mapply(brewer.pal, colrs$maxcolors, rownames(colrs)))
 col <- sample(col_vec, n)
 
-ggplot(bgc, aes(x = "", fill = Type)) +
+ggplot(bgc, aes(x = "", fill = Type_antismash)) +
   geom_bar(position = "fill") +
   scale_fill_manual(values = col)
 
-ggplot(bgc, aes(x = On_contig_edge, fill = Type)) +
+ggplot(bgc, aes(x = On_contig_edge, fill = Type_antismash)) +
   geom_bar()+
   scale_fill_manual(values = col)
 ```
 
-Let's look at the individual BGCs. They are on full contigs, but all my annotations are on the predicted genes. I will investigate the annotations for the genes from each contig. 
-First, start with some data manipulation of the taxa. 
+
+# MS ANALYSIS
+
+First question: What are the types of BGC's in the coral holobiont?
+- What are the antiSMASH "Types"?
+- What are the closest hits in the MIBiG database? (chose the hit with the closest similarity score)
+- What is the potential function of that closest hit based on the literature cited by MIBiG?
+
+A potential useful graphic here could be a alluvial plot. This would show the annotations and how they split up into different functional groups. 
+
+## alluvial plot
 ```{r}
-prok_contig_taxa <- prok_taxa %>%
-  mutate(Gene = contig) %>% 
-  separate(contig, into = c("base", "contig", "gene_ID" ), sep = "_", remove = FALSE) %>% 
-  mutate(FullContig = paste0(base, "_", contig))
+BGC_data <- bgc %>%
+  dplyr::select(Contig, Type_antismash, Type_MIBiG, Activity_general) %>%
+  group_by(Type_antismash, Type_MIBiG, Activity_general) %>%
+  dplyr::summarise(Count = n()) %>%
+  ungroup()
+
+
+MIBIG <- BGC_data$Type_MIBiG %>% unique
+MIBIG <- MIBIG[!MIBIG == "No MIBiG annotation"]
+
+BGC_data$Type_MIBiG <- factor(BGC_data$Type_MIBiG, levels = c("RiPP",
+                                                              "Other, RiPP",
+                                                              "Other (Nucleoside)",
+                                                              "Other (Fatty acid)",
+                                                              "NRP",
+                                                              "Other (Non-NRP siderophore)",
+                                                              "Alkaloid",
+                                                              "NRP, Polyketide",
+                                                              "Polyketide",
+                                                              "Other",
+                                                              "Terpene",
+                                                              "Terpene, Saccharide",
+                                                              "Saccharide",
+                                                              "No MIBiG annotation"))
+
+BGC_data$Activity_general <- factor(BGC_data$Activity_general, levels = c("antimicrobial", 
+                                                                          "antimicrobial, cytotoxic", 
+                                                                          "antimicrobial precursor",
+                                                                          "antimicrobial defense", 
+                                                                          "antibiotic resistance",
+                                                                          "cytotoxic", 
+                                                                          "phytotoxic",
+                                                                          "toxin",
+                                                                          "virulence factor",
+                                                                          "quorum sensing",
+                                                                          "siderophore",
+                                                                          "zincophore",
+                                                                          "antistress",
+                                                                          "osmolyte",
+                                                                          "membrane",
+                                                                          "capsule production",
+                                                                          "pigment",
+                                                                          "fluorophore",
+                                                                          "non-antimicrobial",
+                                                                          "unknown"))
+
+addline_format <- function(x,...){
+    gsub("\\(", "\n(", x)
+}
+
+ggplot(BGC_data,
+       aes(axis1 = Type_antismash, axis2 = Type_MIBiG, axis3 = Activity_general,
+           y = Count)) +
+  geom_alluvium(aes(fill = Activity_general), alpha = 0.9) +
+  geom_stratum(width = 6/16, , alpha = 0.8,  color = "black") +
+  geom_label(stat = "stratum", aes(label = after_stat(stratum)), fontface = "bold", size = 2.5) +
+  scale_x_discrete(limits = c("BGC type", "MIBiG type", "Function"),
+                   expand = c(0.15, 0.05),
+                   labels = addline_format(c("BGC type (from antiSMASH)", 
+                        "MIBiG type (nearest MIBiG annotation)", "Function (literature search)"))) +
+  labs(y = "Number of contigs", fill = "Activity") +
+  theme_minimal() + 
+  scale_fill_manual(values = stepped(n = 20)) +
+  theme(axis.text.x = element_text(face="bold", size=12, color="black"), 
+        axis.title.x = element_text(face="bold", size=16, color="black"),
+        axis.text.y = element_text(face="bold", size=12, color="black"),
+        axis.title.y = element_blank(),
+        strip.text = element_text(size=10, face="bold"),
+        plot.title = element_text(size=20, face="bold"))
+
+#ggsave("../figures/BGC_alluvial.pdf", width = 9, height = 12)
 ```
 
-Now that I have the data in a format I like. I will investigate the 3 full BGC taxonomic annotations. 
+I'd like to look at only the antimicrobial-type compounds and what the compounds are that they were closely annotated as. I also only want to focus on those BGC's that had a hit in the MIBiG database as I can be more confident on potential functions. This might be best in a table-based format:
 
-### Terpene BGC
-The terpene is on contig k127_167047
 ```{r}
-terpene_tax <- prok_contig_taxa %>% filter(FullContig == "k127_167047") %>%
-  separate(complete_classification, into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), sep = ";")
+antimicrobials <- bgc %>% 
+  filter(Activity_general %in% c("antimicrobial", "antimicrobial, cytotoxic", "antimicrobial precursor", "antimicrobial defense", "antibiotic resistance", "cytotoxic", "phytotoxic", "toxin", "virulence factor")) %>% 
+  dplyr::select(Contig, MIBiG_Reference_Active, Similarity_Score, Compound, Organism, Type_of_activity_or_function, Activity_general) %>%
+  filter(!is.na(MIBiG_Reference_Active)) %>%
+  arrange(Compound) 
 
-ggplot(terpene_tax, aes(x = "", y = n, fill = Family)) +
-  geom_bar(stat = "identity", width = 1) +
-  coord_polar("y", start = 0) +
-  theme_void()
-```
-### Opine-like-metallophore BGC
-The metallophore is on contig k127_491492
-This one is interesting. It is a BGC for a zincophore, for harvesting zinc!!!
-```{r}
-metallophore_tax <- prok_contig_taxa %>% filter(FullContig == "k127_491492") %>%
-  separate(complete_classification, into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), sep = ";")
+antimicrobials %>%
+  kbl() %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"))
 
-ggplot(metallophore_tax, aes(x = "", y = n, fill = Family)) +
-  geom_bar(stat = "identity", width = 1) +
-  coord_polar("y", start = 0) +
-  theme_void()
-```
-### RRE-containing BGC
-The RRE BGC is on contig k127_3016148
-This one is interesting. It is a BGC for a zincophore, for harvesting zinc!!!
-```{r}
-RRE_tax <- prok_contig_taxa %>% filter(FullContig == "k127_3016148") %>%
-  separate(complete_classification, into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), sep = ";")
+antimicrobials$Contig
 
-ggplot(RRE_tax, aes(x = "", y = n, fill = Family)) +
-  geom_bar(stat = "identity", width = 1) +
-  coord_polar("y", start = 0) +
-  theme_void()
+# make a file of all the Contig IDs that are likely antimicrobial or toxin encoding
+# write(antimicrobials$Contig, file = "../data/antimicrobial.bgc.contigs.txt")
 ```
 
+Are the compounds here more prevalent in the healthy compared to the diseased corals? Maybe just look for presence/absence rather than abundance since it is unclear what the actual activity would be. We are just looking for general abundance. 
 
+I will use CoverM, which has a "contig" setting to investigate both the mean number of reads covering each position in the contig as well as the rpkm based abundances. From there, I will choose a threshold for presence/absence and calculate the prevalence of the BGC's in both the healthy as well as the diseased corals. I will look for which BGCs are more prevalent in either the healthy or diseased corals using a test I have done before that works with prevalence.  
+I will use the mean coverage metric more than likely rather than the RPKM term. It seems a little more intuitive and I like that I could also set a threshold for what I will consider an acceptable mean coverage value. 
 
+First - Need to manipulate the data. I need to put it in a presence/absence format. Maybe to start, I could just take a look at all the data. 
+
+## Mean exploration
+
+```{r}
+pheatmap(antibac)
+```
+Theres a lot of very low values. Try making presence/absence with anything above 0 being present.
+
+```{r}
+antibac_presabs <- ifelse(antibac > 0, 1, 0)
+
+pheatmap(antibac_presabs)
+```
+
+I will show mean coverage as I think it is a little more intuitive. The idea is that in the sample the reads cover differently sized contigs and it is the amount of the contig that is covered. I am assuming that if any part of a contig is covered (at the threshold set by the program), then it is likely found in that coral holobiont and thus that BGC may be in that coral.
+
+## Heatmap, mean pres/abs
+
+Maybe I can make a heatmap of the different contigs and color them by the health/disease status of the samples and by the grouping of the BCG. And make the presence/absence just black and white.
+
+```{r}
+metadata$CoralID
+colnames(antibac_presabs)
+
+# Subset metadata and get it in the same order as the heatmap data
+idx <- match(colnames(antibac_presabs), metadata$CoralID)
+metadata_bgc <- metadata[idx, ]
+
+match(metadata_bgc$CoralID, colnames(antibac_presabs))
+
+# Categorical information (e.g Sample Disease Status)
+annotation_col <- data.frame(
+  Condition = metadata_bgc$Disease_on_colony_when_coring_binary)
+rownames(annotation_col) <- colnames(antibac_presabs)
+
+annotation_col$Condition <- factor(annotation_col$Condition, levels = c("Unaffected", "Diseased"))
+
+# Custom colors for annotation
+ann_colors <- list(
+  Condition = c(Unaffected = "#0C7BDC", Diseased = "#FFC20A"),
+  Activity_General = c(
+    "antimicrobial" = "#990F26", 
+    "antimicrobial, cytotoxic" = "#B33E52", 
+    "antimicrobial precursor" = "#CC7A88",
+    "antimicrobial defense" = "#E6B8BF", 
+    "antibiotic resistance" = "#99600F",
+    "cytotoxic" = "#B3823E", 
+    "phytotoxic" = "#CCAA7A",
+    "toxin" = "#E6D2B8",
+    "virulence factor" = "#54990F"
+  )
+)
+
+# Categorical annotation for rows (e.g. BGC types)
+antimicrobials$Contig
+rownames(antibac_presabs)
+
+antimicrobials$Contig_Compound <- paste0(antimicrobials$Contig," (", antimicrobials$Compound, ")")
+
+# Get the rows to match with the BGC metadata
+idx <- match(rownames(antibac_presabs), antimicrobials$Contig)
+bgc_antimicrobial_info <- antimicrobials[idx, ]
+
+# Check it worked
+match(bgc_antimicrobial_info$Contig, rownames(antibac_presabs))
+
+# Rename the rows of the matrix by the new contig and compound name
+antibac_presabs_forheatmap <- antibac_presabs
+rownames(antibac_presabs_forheatmap) <- bgc_antimicrobial_info$Contig_Compound
+
+# Set annotation levels for contigs (General Activity of BGC)
+annotation_row <- data.frame(
+  Activity_General = bgc_antimicrobial_info$Activity_general)
+
+rownames(annotation_row) <- rownames(antibac_presabs_forheatmap)
+
+annotation_row$Activity_General <- factor(annotation_row$Activity_General, levels = c("antimicrobial", 
+                                                                          "antimicrobial, cytotoxic", 
+                                                                          "antimicrobial precursor",
+                                                                          "antimicrobial defense", 
+                                                                          "antibiotic resistance",
+                                                                          "cytotoxic", 
+                                                                          "phytotoxic",
+                                                                          "toxin",
+                                                                          "virulence factor"))
+
+# Define a black-to-white color gradient
+bw_colors <- colorRampPalette(c("white", "black"))(10)
+
+# Generate heatmap with colored gene names
+pheatmap(antibac_presabs_forheatmap, 
+        annotation_row = annotation_row, 
+        annotation_colors = ann_colors,
+        annotation_col = annotation_col, 
+        color = bw_colors,
+        cluster_rows = TRUE, cluster_cols = TRUE)
+
+# Save heatmap to PDF
+pdf("../figures/BGC_antimicrobial_heatmap.pdf", width = 13, height = 9)
+pheatmap(antibac_presabs_forheatmap, 
+        annotation_row = annotation_row, 
+        annotation_colors = ann_colors,
+        annotation_col = annotation_col, 
+        color = bw_colors,
+        border_color = "black",
+        cluster_rows = TRUE, cluster_cols = TRUE)
+dev.off()  # Close the PDF device
+```
+
+## Stats - Fisher's Exact Test
+
+I want to see if any of the BGC's were significantly differentially prevalent between unaffected and diseased corals. 
+
+I hypothesize that the healthy coral samples may have a greater prevalence of BGC's encoding potential antimicrobial or toxic compounds to help support the maintenance of the coral host and protect against infection. 
+
+Use a fisher's exact test to test that one gene is significantly differentially prevalent between unaffected and diseased corals.
+```{r}
+#Combine all the info
+bgc_all_data <- antibac_presabs %>% 
+  as_tibble() %>%
+  mutate(Contig = rownames(antibac_presabs)) %>%
+  left_join(antimicrobials, by = "Contig") %>%
+  gather(key = "sample", value = "pres_abs", `1220`:N73) %>%
+  mutate(pres_abs_words = ifelse(pres_abs == 1, "Present", "Absent")) %>%
+  left_join(metadata_bgc, by = c("sample" = "CoralID"))
+
+# Try with just one BGC to test out the Fisher's Exact Test to see that it works
+bgc_test <- bgc_all_data %>%
+  filter(Contig == "k127_2342471") %>%
+  group_by(Disease_on_colony_when_coring_binary, pres_abs_words) %>%
+  summarize(count = length(pres_abs_words)) %>%
+  tidyr::spread(Disease_on_colony_when_coring_binary, count) %>%
+  dplyr::select(Unaffected, Diseased) %>%
+  as.data.frame()
+
+rownames(bgc_test) <- c("Absent", "Present")
+
+# Run the Fisher's exact test - testing the null of independence of rows and columns in the contingency table - null hypothesis - no difference between presence and absence of genes 
+set.seed(100)
+fisher_result <- fisher.test(bgc_test)
+print(fisher_result)
+
+bgc_all_data %>% filter(Contig == "k127_2826510")
+```
+
+```{r}
+# Create a function to perform Fisher's exact test
+perform_fisher_test <- function(gene_row) {
+  # Create a 2x2 contingency table
+  contingency_table <- matrix(as.integer(gene_row[2:5]), nrow = 2) #make sure the table is an integer
+  
+  # Perform Fisher's exact test
+  set.seed(100)
+  fisher_result <- fisher.test(contingency_table)
+  
+  # Return the p-value
+  return(fisher_result$p.value)
+}
+
+BGC_fisher <- bgc_all_data %>%
+  group_by(Contig, Disease_on_colony_when_coring_binary, pres_abs_words) %>%
+  summarize(count = length(pres_abs_words)) %>%
+  mutate(disease_presabs = paste0(Disease_on_colony_when_coring_binary,"_",pres_abs_words)) %>%
+  ungroup() %>%
+  dplyr::select(Contig, count, disease_presabs) %>%
+  as.data.frame() 
+
+bgcs_antimicrobials <- BGC_fisher$Contig
+
+BGC_fisher_wide <- BGC_fisher %>%
+  group_by(Contig) %>%
+  dplyr::select(count, disease_presabs) %>%
+  pivot_wider(names_from = disease_presabs, values_from = count, values_fill = 0)
+  #mutate(keep = ifelse(High_Present + Low_Present == 0, FALSE, TRUE)) %>% # make a row ID'ing to keep or not some moduels
+ # filter(keep == TRUE)
+
+# Apply the function to each row (gene) in the table and perform a multiple test correction
+p_values <- base::apply(BGC_fisher_wide, 1, perform_fisher_test)
+
+p_adjusted_BH <- p.adjust(p_values, method = "BH")
+
+# Combine gene names and p-values into a table
+bgc_p_values <- data.frame(Contig = BGC_fisher_wide$Contig, Adj_P_Value = p_adjusted_BH) %>% 
+  mutate(significant = ifelse(Adj_P_Value < 0.05, "significant", "not"))
+
+# Print the table - see which genes are different between high and low resistant corals
+print(bgc_p_values)
+
+# Add the p-values to the antimicrobials table
+antimicrobials_with_pval <- left_join(antimicrobials, bgc_p_values, by = "Contig")
+
+# How many of each type?
+table(antimicrobials$Compound)
+
+# Which compounds are most prevalent across all corals?
+contig_prev <- data.frame(Contig = rownames(antibac_presabs), 
+                          N_coral_present = rowSums(antibac_presabs)) %>%
+  left_join(antimicrobials, by = "Contig") %>%
+  arrange(desc(N_coral_pres))
+```
+Cool...looks like none of the biosynthetic gene clusters were significantly differentially prevalent between the diseased and healthy corals. The takeaway there is that both diseased and healthy corals harbor the BGCs that encode diverse antimicrobial functions. These clusters may help both maintain the coral holobiont through production of diverse antimicrobial compounds or even promote infection in diseased corals. 

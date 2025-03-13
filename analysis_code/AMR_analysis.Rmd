@@ -60,7 +60,7 @@ prokreads <- read.table("../data/prok_FLK_coassembly_salmon_quant_all_NumReads.t
 prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
 
 # Load metadata
-metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
+metadata <- as.data.frame(read_excel("../data/RRC_sample_CoreSiteData_v10_RRCCoreData_SP1.xlsx", na = "NA"))
 rownames(metadata) <- metadata$CoralID
 
 # how many genes are zero across all samples? Like 32k
@@ -222,7 +222,7 @@ Heatmap(
 
 Random metadata graph that I need
 ```{r}
-ggplot(metadata_prok, aes(x = "", y = "", fill = Zoox_background)) +
+ggplot(metadata_prok, aes(x = "", y = "", fill = Zoox_composition_New)) +
   geom_bar(stat = "identity", width = 1) +
   coord_polar("y", start = 0) +
   theme_void() +
@@ -299,12 +299,12 @@ disease_pca
 # Make the shape the background symbiont 
 plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
                 color="Disease_on_colony_when_coring_binary", 
-                shape ="Zoox_background") +
+                shape ="Zoox_composition_New") +
   geom_point(size = 4) +
   coord_fixed() +
   labs(color = "Disease at sampling", shape = "Symbiont Composition") +
   scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  scale_shape_manual(values = c(3, 15, 17, 19))
+  scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
 
 # colony disease at sampling PERMANOVA
 set.seed(10)
@@ -315,7 +315,7 @@ adonis2(formula = ps.amr.euc_diss ~ Disease_on_colony_when_coring_binary, data =
 
 # plot PCA with labels to see which corals are farther apart
 plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Zoox_composition", shape = "Disease_on_colony_when_coring_binary") +
+                color="Zoox_composition_New", shape = "Disease_on_colony_when_coring_binary") +
   geom_point(size = 4) +
   coord_fixed() +
   ggrepel::geom_text_repel(label = sample_data(ps.amr_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
@@ -323,7 +323,7 @@ plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples",
 
 # without the labels - want transparency
 symbiont_pca <- plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Zoox_composition", shape = "Disease_on_colony_when_coring_binary") +
+                color="Zoox_composition_New", shape = "Disease_on_colony_when_coring_binary") +
   coord_fixed() +
   labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
 
@@ -336,7 +336,7 @@ symbiont_pca_final
 
 # colony symbiont composition PERMANOVA
 set.seed(10)
-adonis2(formula = ps.amr.euc_diss ~ Zoox_composition, data = ps.amr.clr_meta, permutations = 999) 
+adonis2(formula = ps.amr.euc_diss ~ Zoox_composition_New, data = ps.amr.clr_meta, permutations = 999) 
 ```
 ### Colony Fate
 ```{r}
@@ -518,12 +518,7 @@ print(unique_combinations)
 tax_table(ps.genefam)[,1] %>% unique
 ```
 
-### Supp Figure - Graphs together
-```{r}
-wrap_plots(rest.mech, genefam, nrow = 2, axis_titles = "collect_x")
 
-ggsave("../figures/AMR_all_stacked_bar.pdf", width = 12, height = 8)
-```
 
 
 ## Beta-lactamases
@@ -695,14 +690,16 @@ disease_pca <- plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples",
 disease_pca
 
 # Make the shape the background symbiont 
-plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
+amr_pca <- plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
                 color="Disease_on_colony_when_coring_binary", 
-                shape ="Zoox_composition") +
+                shape ="Zoox_composition_New") +
   geom_point(size = 4) +
   coord_fixed() +
-  labs(color = "Disease at sampling", shape = "Symbiont Composition") +
+  labs(color = "Disease at sampling", shape = "Symbiodiniaceae Composition") +
   scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  scale_shape_manual(values = c(3, 15, 17, 19, 20))
+ scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
+
+amr_pca
 
 # colony disease at sampling PERMANOVA
 set.seed(10)
@@ -710,7 +707,7 @@ adonis2(formula = ps.amr.bl.euc_diss ~ Disease_on_colony_when_coring_binary, dat
 
 # colony zoox PERMANOVA
 set.seed(10)
-adonis2(formula = ps.amr.bl.euc_diss ~ Zoox_composition, data = ps.amr.bl.clr_meta, permutations = 999) 
+adonis2(formula = ps.amr.bl.euc_diss ~ Zoox_composition_New, data = ps.amr.bl.clr_meta, permutations = 999) 
 ```
 
 # Amoxicillin treatments
@@ -908,6 +905,15 @@ ggarrange(ggarrange(ggarrange(treatments, richness, ncol = 2, common.legend = TR
           betalactam.tax, widths = c(1.5, 1), labels = c("", "c.")), 
           blactams, nrow = 2, labels = c("", "d."))
 
-ggsave("../figures/AMR_beta-lactamase.pdf", width = 13, height = 9)
+wrap_plots(wrap_plots(treatments, richness),
+           wrap_plots(betalactam.tax, amr_pca), nrow = 2, heights = c(1,1.3), axis_titles = "collect")
+
+#ggsave("../figures/AMR_beta-lactamase_wPCA.pdf", width = 13, height = 9)
 ```
 
+### SUPP FIGURE - Graphs together
+```{r}
+wrap_plots(rest.mech, genefam,blactams, nrow = 3, axis_titles = "collect_x")
+
+#ggsave("../figures/AMR_all_betalactams_stacked_bar.pdf", width = 12, height = 15)
+```
