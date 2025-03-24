@@ -517,7 +517,7 @@ I am going to use raw counts of the different genes from Salmon since Corncob mo
 
 For the symbiont composition, I will use the new column called `Zoox_composition`, which doesn't have errors. DO NOT USE the Zoox_background column anymore. There are errors in it. 
 
-3/2/25 - I UPDATED THIS with the new zoox composition groupings. This way the anlaysis reflects the actual symbiont groupings.  
+3/2/25 - I UPDATED THIS with the new zoox composition groupings (`Zoox_composition_New`). This way the anlaysis reflects the actual symbiont groupings.  
 ```{r}
 ## Set levels
 sample_data(ps.prok.annotated)$Disease_on_colony_when_coring_binary <-
@@ -1222,5 +1222,233 @@ sig.nonmetab.genes.KO.subsetforgraph.tax
 
 write.table(sig.metab.genes.subsetforgraph.tax, "../data/DA_MainFig_Gene_Information_a_03.02.25.txt", sep="\t", row.names = FALSE, col.names = TRUE)
 write.table(sig.nonmetab.genes.KO.subsetforgraph.tax, "../data/DA_MainFig_Gene_Information_b_03.02.25.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+```
+
+# ZOOX ANALYSIS - RRC Report
+
+In addition to focusing on the diseased/unaffected colonies, one of the main deliverables of the RRC report was investigating microbial genes associated with the symbionts. Since I have the new symbiont composition categories, i can do a corncob analysis to look for differentially abundant genes. 
+
+I will use the similar code to that I have above. 
+
+## Data 
+```{r}
+# Load table with count abundances from salmon ("numreads")
+prokreads <- read.table("../data/prok_FLK_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
+prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
+
+# Load metadata
+metadata <- as.data.frame(read_excel("../data/RRC_sample_CoreSiteData_v10_RRCCoreData_SP1.xlsx", na = "NA"))
+rownames(metadata) <- metadata$CoralID
+
+# how many genes are zero across all samples? Like 32k
+table(rowSums(prokreads) == 0)
+
+# remove them
+prokreads_nozero <- prokreads[rowSums(prokreads) != 0, ]
+dim(prokreads_nozero)
+
+# any samples with no reads? No.
+table(colSums(prokreads_nozero) == 0)
+
+# Fix the sample names bc R doesn't like column names that start with a number
+colnames(prokreads_nozero) <- str_replace_all(colnames(prokreads_nozero), pattern = "[X]", "")
+colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
+
+# Read in the taxonomy
+prok_taxa <- read.table("../data/FLK_prok_coassembly_tax_mmseqs2.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
+```
+
+### KO data
+```{r}
+# load KO and Gene ids
+# Read all lines from the file
+lines <- readLines("../data/user_ko.txt")
+
+# Split each line by tab ("\t")
+split_lines <- strsplit(lines, "\t")
+
+# Convert the split lines into a data frame
+gene_ko <- do.call(rbind, lapply(split_lines, function(x) {
+  if (length(x) == 1) {
+    c(x[1], NA)  # If only one column, fill second column with NA
+  } else {
+    x  # Keep both columns
+  }
+}))
+
+# Assign column names
+colnames(gene_ko) <- c("geneID", "KO")
+
+dim(gene_ko)
+unique(gene_ko) %>% dim
+
+# Convert to a data frame
+gene_ko <- as.data.frame(gene_ko, stringsAsFactors = FALSE)
+
+# how many unique KO ids?
+gene_ko$KO %>% unique %>% length
+
+# View the resulting data
+print(head(gene_ko))
+
+# Read in the table of the annotations
+ko_info <- read_excel("../data/kegg_data.xlsx", col_names = TRUE, na = "")
+
+# Get rid of the "KO" in the first column
+ko_info$ENTRY <- str_split_i(ko_info$ENTRY, " ", 1)
+
+head(ko_info)
+dim(ko_info)
+
+# How many unique KOs? 4563
+ko_info$KO_ID %>% unique %>% length
+ko_info$ENTRY %>% unique %>% length
+
+# There's too many duplicate rows. Should have only 4,563
+ko_info_nodups <- unique(ko_info)
+
+# add the annotation info to the gene_ko documant
+gene_ko_join <- gene_ko %>%
+  left_join(ko_info_nodups, by = c("KO" = "ENTRY"))
+
+# How many genes are annotated? 32,980
+sum(!is.na(gene_ko_join$KO))
+
+# Filter to only include the annotated columns (should end with 32,980 rows)
+gene_ko_annotated <- gene_ko_join[!is.na(gene_ko_join$KO), ]
+
+# It looks like there are some duplicated gene IDs
+gene_ko_annotated$geneID %>% unique %>% length
+
+# Get rid of duplicate geneID's
+unique_gene_ko_annotated<- gene_ko_annotated[!duplicated(gene_ko_annotated$geneID), ]
+dim(unique_gene_ko_annotated)
+
+# Rename the rows 
+rownames(unique_gene_ko_annotated) <- unique_gene_ko_annotated[,"geneID"]
+```
+
+## Phyloseq object
+Start with a phyloseq object jsut with the count data (no annotation information). The annotations aren't needed for the PCAs I want to make. 
+```{r}
+## Make phyloseq object of count-related data 
+idx <- match(colnames(prokreads_nozero), rownames(metadata))
+metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced samples
+
+NUMREADS = otu_table(prokreads_nozero, taxa_are_rows = TRUE)
+META = sample_data(metadata_prok)
+FXN = tax_table(as.matrix(unique_gene_ko_annotated))
+
+ps.prok.annotated <- phyloseq(NUMREADS, META, FXN)
+ps.prok.annotated
+```
+
+## Corncob
+
+I will use corncob to test the hypothesis that functional genes change in abundance between corals containing different compositions of symbiodiniaceae in their tissues (`Zoox_composition_New`). 
+
+```{r}
+## Set levels
+sample_data(ps.prok.annotated)$Zoox_composition_New <- 
+  factor(sample_data(ps.prok.annotated)$Zoox_composition_New, 
+         levels = c("B", "B_dom_plus_C", "B_dom_plus_CD", "B_dom_plus_D", "BD", "CD"))
+
+head(sample_data(ps.prok.annotated)$Zoox_composition_New, 10) # levels look good
+
+## Test disease on colony when coring and control for symbiont composition
+set.seed(10) # set seed for reproducibility
+prok.da.zoox <- differentialTest(formula = ~ Zoox_composition_New, 
+                                  phi.formula = ~ Zoox_composition_New,
+                                  formula_null = ~ 1,
+                                  phi.formula_null = ~ Zoox_composition_New,
+                                  test = "Wald", boot = FALSE,
+                                  data = ps.prok.annotated,
+                                  fdr_cutoff = 0.05)
+
+plot(prok.da.zoox, level = "SYMBOL")
+prok.da.zoox$significant_taxa %>% length # Wow 2000 differentially abundant taxa
+```
+
+WOW! This resulted in 2000 differentially abundant taxa!!! That is a LOT, which may partially be beacuase some of the groups only had 1 sample in them, so I'll be curious how that worked. My goal next is to save all the data so I can report it in a supplementary Table.Definitiealy the most differentially abundant taxa in the BD group compared to B.
+
+## Process output
+
+Out of curiosity, I am also going to see how many taxa there are with a more stringent p-value cutoff. Save all the data first
+```{r}
+# write a function to extract the corncob results when there are 5 test levels (relavtive to the 6th baseline category)
+extractmods5 <- function(model) {
+  result <- data.frame("Estimate" = model$coefficients[2:6, 1], 
+                        "Std.Error" = model$coefficients[2:6, 2], 
+                       "t.value" = model$coefficients[2:6, 3], 
+                        "p" = model$coefficients[2:6, 4],
+                       "Comparison" = c("B_vs_B_dom_plus_C",
+                                        "B_vs_B_dom_plus_CD",
+                                        "B_vs_B_dom_plus_D",
+                                        "B_vs_BD",
+                                        "B_vs_CD"))
+  return(result)
+}
+
+# save the output as a list using the above function
+sig.models.zoox <- lapply(prok.da.zoox$significant_models, extractmods5)
+names(sig.models.zoox) <- prok.da.zoox$significant_taxa
+
+# save a table of annotations for just the significant genes
+sig.fxnl.genes.zoox <- filter(unique_gene_ko_annotated, geneID %in% prok.da.zoox$significant_taxa)
+
+# turn the output from a list to a dataframe for ease of saving and manipulating
+# Additionally add further annotation information
+sig.models.zoox.df <- plyr::ldply(sig.models.zoox, data.frame) %>% 
+  mutate(Significant = ifelse(p < 0.05, TRUE, FALSE)) %>%
+  left_join(sig.fxnl.genes.zoox, by = c(".id" = "geneID")) %>%
+  left_join(prok_taxa, by = c(".id" = "contig"))
+
+### Save these data so you don't have to re-run the model ###
+write.table(sig.models.zoox.df, "../data/Corncob_prok_annotated_ZooxComposition.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+```
+
+So this output is slightly confusing because for a given overall differentiallky abundant gene, it may be signficantly differentially abundant between B and CD, but not differentially abundant for other genes. I will count up different summary stats which may be more informative to report. 
+
+How many overall differentially abundant genes?
+```{r}
+sig.models.zoox.df$.id %>% unique %>% length
+```
+Looks like 2000 genes. 
+
+How many of these genes were differentially abundant in each comparison?
+```{r}
+sig.models.zoox.df %>% 
+  group_by(Comparison) %>% 
+  summarise(Significant_Gene_Count = sum(Significant == TRUE))
+
+sample_data(ps.prok.annotated)$Zoox_composition_New %>% table
+```
+
+Looks like the most significantly differentially abundant genes were those in the B_vs_BD comparison (1,762 genes!) as well as the B_vs_CD comparison (291 genes). This makes sense because the CD and BD groupings have large groups of either C and D symbionts. I want to exercise caution however, because these goups were also significantly underreppresented in the dataset. There was only one of each CD and BD symbiont composition type. The most abundant grouping was the B only, which was 21 samples (about half the corals). The corals that had small proportions of either C, CD, or D included 5-7 corals, which is better representation. 
+
+How many signfiicantly differentially abundant genes if we ignore any genes differentially abundant ONLY in the CD or BD groups?
+```{r}
+sig.NO_CD_or_BD <- sig.models.zoox.df %>% 
+  filter(Comparison %in% c("B_vs_B_dom_plus_C", "B_vs_B_dom_plus_CD", "B_vs_B_dom_plus_D")) %>%
+  filter(Significant == TRUE)
+
+# how many genes?
+sig.NO_CD_or_BD$.id %>% unique %>% length
+```
+
+WAAAAYYYY Fewer genes. Good to know. I will include all of them for reference, but this is a good reminder that sometimes considering groupings are important.
+
+I'm also now curious, for each grouping, how many were enriched in the test group and how many were enriched in the baseline group. 
+```{r}
+sig.models.zoox.df %>% 
+  filter(Significant == TRUE) %>%
+  group_by(Comparison) %>% 
+  summarise(Enriched_in_B = sum(Estimate < 0))
+
+
+sig.models.zoox.df %>% 
+  filter(Significant == TRUE) %>%
+  group_by(Comparison) %>% 
+  summarise(Enriched_in_test_group = sum(Estimate > 0))
 ```
 

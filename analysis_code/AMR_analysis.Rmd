@@ -112,6 +112,10 @@ amr %>%
 
 amr %>% 
   dplyr::count(AMR_Gene_Family)
+
+# How many unique genes had AMR "hits"
+
+amr$ORF_ID %>% unique %>% length
 ```
 Let's look at the 49 "strict" hits. What are some different stats for them?
 ```{r}

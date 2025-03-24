@@ -1115,7 +1115,7 @@ rownames(metadata) <- metadata$CoralID
 
 # how many genes are zero across all samples? Like 32k
 table(rowSums(prokreads) == 0)
-
+nrow(prokreads)
 # remove them
 prokreads_nozero <- prokreads[rowSums(prokreads) != 0, ]
 dim(prokreads_nozero)
