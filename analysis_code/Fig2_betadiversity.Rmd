@@ -37,1067 +37,6 @@ library(devtools)
 library(pairwiseAdonis)
 ```
 
-# Load Data
-
-## Read in tables, remove zeros
-```{r}
-# Load table with count abundances from salmon ("numreads")
-numreads <- read.table("../data/FLK_coassembly_salmon_quant_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
-numreads <- numreads[, -1] # get rid of the first column cause it is just numbered lines
-
-# Load the table with taoxnomic information from mmseqs2
-taxa <- read.table("../data/FLK_coassembly_tax_mmseqs2_lca.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
-
-# Load the table with functional information from eggnog mapper
-fxn <- read_excel("../data/FLK_coassembly_fxn_eggnog.xlsx", skip = 2, na = "-")
-
-# Load metadata
-metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
-rownames(metadata) <- metadata$CoralID
-
-# how many contigs are zero across all samples?
-table(rowSums(numreads) == 0)
-
-# remove them
-numreads_nozero <- numreads[rowSums(numreads) != 0, ]
-dim(numreads_nozero)
-
-# any samples with no reads?
-table(colSums(numreads_nozero) == 0)
-
-# Fix the sample names bc R doesn't like column names that start with a number
-colnames(numreads_nozero) <- str_replace_all(colnames(numreads_nozero), pattern = "[X]", "")
-colnames(numreads_nozero) <- str_split_i(colnames(numreads_nozero), "[_]", 1)
-```
-
-## Make phyloseq object of count-related data 
-```{r}
-idx <- match(colnames(numreads_nozero), rownames(metadata))
-metadata_3 <- metadata[idx,] # subset the metadata to only the sequenced samples
-
-NUMREADS = otu_table(numreads_nozero, taxa_are_rows = TRUE)
-META = sample_data(metadata_3)
-
-ps.count <- phyloseq(NUMREADS, META)
-ps.count
-
-# save phyloseq object for easy use in the future
-saveRDS(ps.count, "../data/FLK_coassembly_phyloseq_count.rds")
-```
-
-## Filter ps by abundance
-```{r}
-# Just to get fewer contigs/genes/taxa, sum > 10 number of reads total to remove the more sparse contigs
-ps.count.filt <- filter_taxa(ps.count, function(x) sum(x) > 10, TRUE) # 1,743,873 contigs left
-ps.count.filt
-```
-
-## Save PS object for quicker code 
-```{r}
-saveRDS(ps.count.filt, "../data/FLK_coassembly_phyloseq_count.filt.rds")
-```
-
-# Load PS object 
-NOTE: Only do this to read in the RDS phyloseq object that you saved if it already exists. 
-```{r}
-ps.count.filt <- readRDS("../data/FLK_coassembly_phyloseq_count.filt.rds")
-
-# transform the data using centered log-ratio transformations
-ps.count.filt_clr <- microbiome::transform(ps.count.filt, 'clr')
-
-# Generate aitchison distance ordination (euclidean distance on clr-transformed data)
-ps.count.filt_clr_euc <- ordinate(ps.count.filt_clr, "RDA", "euclidean")
-
-# Generate aitchison distance dissimilarity matrix with vegan for adonis2 test
-count.clr_meta <- as(sample_data(ps.count.filt_clr), "data.frame")
-count.clr_otu <- otu_table(ps.count.filt_clr) %>% as.matrix %>% t() #samples must be rows, so transpose
-
-#get dissimilarity matrix 
-count.euc_diss <- vegdist(count.clr_otu, method = "euclidean")
-```
-
-# Beta Diversity Analysis
-
-## Fate
-### PCA fate
-```{r}
-sample_data(ps.count.filt_clr)$Fate_after_SP1 <- 
-              factor(sample_data(ps.count.filt_clr)$Fate_after_SP1, 
-                                 levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
-
-# plot PCA - facet by fate
-pca_fate <- plot_ordination(ps.count.filt_clr, ps.count.filt_clr_euc, type="samples", 
-                color="Fate_after_SP1") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  facet_wrap(. ~ Fate_after_SP1) +
-  scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Colony Fate")
-pca_fate
-
-# Conduct statistical tests on Fate 
-# Use the dissimilarity matrix from where you read in the ps object
-set.seed(10)
-adonis2(formula = count.euc_diss ~ Fate_after_SP1, data = count.clr_meta, permutations = 999) 
-```
-
-### betadisper fate
-```{r}
-# Run betadisper function from vegan
-# Hypothesis - Colony fate explains the variability in the functional microbiome
-disp.fate <- betadisper(count.euc_diss, count.clr_meta$Fate_after_SP1)
-
-# save the distances and combine with metadata
-distances <- disp.fate$distances
-disp.fate.meta <- cbind(distances, count.clr_meta)
-
-# Set the levels so the graphs match
-disp.fate.meta$Fate_after_SP1 <- factor(disp.fate.meta$Fate_after_SP1, levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
-
-# Are the data normally distributed in each group?
-ggqqplot(disp.fate.meta$distances) # not normal looking
-shapiro.test(disp.fate.meta$distances) # data not normal
-
-# Do a Kruskal-Wallis test (nonparametric) to see if there are significant differences in the dispersion by fate
-# My question: Is there a significant difference in dispersion between fate groups?
-kruskal.test(distances ~ Fate_after_SP1, data = disp.fate.meta)
-
-#Pairwise tests using the Wilcoxon rank sum test with Benjamini-Hochberg correction for multiple testing, which creates an adjusted P value:
-pairwise.wilcox.test(disp.fate.meta$distances, disp.fate.meta$Fate_after_SP1, p.adjust.method = "BH") 
-
-# Plot the results
-betadisp_fate <- ggplot(disp.fate.meta, aes(x = Fate_after_SP1, y = distances)) +
-  geom_boxplot(lwd = 1, outlier.shape = NA) +
-  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Fate_after_SP1), size = 4) +
-  ylab("Distance to Centroid") +
-  theme(legend.text.align = 0) +
-  scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Colony Fate", shape = "Reef", x = "Colony Fate")
-
-betadisp_fate
-```
-
-### Supp. Figure - Fate
-```{r}
-ggarrange(pca_fate, betadisp_fate, labels = c("a.", "b."), common.legend = TRUE)
-ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
-```
-
-### PCA fate subset
-```{r}
-# subset the unaffected and diseased fates (no recovered or will be diseased)
-ps.count.filt_clr_subset <- subset_samples(ps.count.filt_clr, Fate_after_SP1 %in% c("Unaffected", "Diseased"))
-
-# Generate aitchison distance ordination (euclidean distance on clr-transformed data)
-ps.count.filt_clr_euc_subset <- ordinate(ps.count.filt_clr_subset, "RDA", "euclidean")
-
-# Generate aitchison distance dissimilarity matrix with vegan for adonis2 test
-count.clr_meta_subset <- as(sample_data(ps.count.filt_clr_subset), "data.frame")
-count.clr_otu_subset <- otu_table(ps.count.filt_clr_subset) %>% as.matrix %>% t() #samples must be rows, so transpose
-
-#get dissimilarity matrix 
-count.euc_diss_subset <- vegdist(count.clr_otu_subset, method = "euclidean")
-
-sample_data(ps.count.filt_clr_subset)$Fate_after_SP1 <- 
-              factor(sample_data(ps.count.filt_clr_subset)$Fate_after_SP1, 
-                                 levels = c("Unaffected", "Diseased"))
-
-# plot PCA - facet by fate
-pca_fate <- plot_ordination(ps.count.filt_clr_subset, ps.count.filt_clr_euc_subset, type="samples", 
-                color="Fate_after_SP1") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  scale_color_manual(values = c("#648FFF", "#DC267F")) +
-  labs(color = "Colony Fate")
-pca_fate
-
-# Conduct statistical tests on Fate 
-# Use the dissimilarity matrix from where you read in the ps object
-set.seed(10)
-adonis2(formula = count.euc_diss_subset ~ Fate_after_SP1, data = count.clr_meta_subset, permutations = 999) 
-```
-
-## Symbiodiniaceae background
-### PCA symbiont
-```{r}
-sample_data(ps.count.filt_clr)$Zoox_background <- factor(sample_data(ps.count.filt_clr)$Zoox_background, levels = c("none", "C", "CD", "D"))
-sample_data(ps.count.filt_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.count.filt_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# plot PCA with labels to see which corals are farther apart
-plot_ordination(ps.count.filt_clr, ps.count.filt_clr_euc, type="samples", 
-                color="Zoox_background", shape = "Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  ggrepel::geom_text_repel(label = sample_data(ps.count.filt_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
-  labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-# without the labels - want transparency
-symbiont_pca <- plot_ordination(ps.count.filt_clr, ps.count.filt_clr_euc, type="samples", 
-                color="Zoox_background", shape = "Disease_on_colony_when_coring_binary") +
-  coord_fixed() +
-  labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-symbiont_pca$layers
-
-symbiont_pca$layers <- symbiont_pca$layers[-1]
-
-symbiont_pca_final <- symbiont_pca + geom_point(size=4, alpha=0.8)
-symbiont_pca_final
-
-# Conduct statistical tests on the background symbiont
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = count.euc_diss ~ Zoox_background, data = count.clr_meta, permutations = 999) 
-
-#ggsave("../figures/PCA_zoox.png", width = 6, height = 4)
-```
-Note that for the symbiodiniaceae results, sample 3421 is the one colony with a dominant genus different (cladocopium) than all the others (breviolum). That coral is all the way out on its own in terms of a functional microbiome and was also consistently diseased. 
-
-### betadisper symbiont
-```{r}
-# Run betadisper function from vegan
-# Hypothesis - Colony fate explains the variability in the functional microbiome
-disp.symbiont <- betadisper(count.euc_diss, count.clr_meta$Zoox_background)
-
-# save the distances and combine with metadata
-distances <- disp.symbiont$distances
-disp.symbiont.meta <- cbind(distances, count.clr_meta)
-
-# Set the levels so the graphs match
-disp.symbiont.meta$Zoox_background <- factor(disp.symbiont.meta$Zoox_background, levels = c("none", "C", "CD", "D"))
-disp.symbiont.meta$Disease_on_colony_when_coring_binary <-
-  factor(disp.symbiont.meta$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# Are the data normally distributed in each group?
-ggqqplot(disp.symbiont.meta$distances) # not normal looking
-shapiro.test(disp.symbiont.meta$distances) # data not normal
-
-# Do a Kruskal-Wallis test (nonparametric) to see if there are significant differences in the dispersion by fate
-# My question: Is there a significant difference in dispersion between fate groups?
-kruskal.test(distances ~ Zoox_background, data = disp.symbiont.meta)
-
-#Pairwise tests using the Wilcoxon rank sum test with Benjamini-Hochberg correction for multiple testing, which creates an adjusted P value:
-pairwise.wilcox.test(disp.symbiont.meta$distances, disp.symbiont.meta$Zoox_background, p.adjust.method = "BH") 
-
-# Plot the results
-betadisp_symbiont <- ggplot(disp.symbiont.meta, aes(x = Zoox_background, y = distances)) +
-  geom_boxplot(lwd = 0.5, outlier.shape = NA) +
-  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Zoox_background, shape = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  ylab("Distance to Centroid") +
-  theme(legend.text.align = 0) +
-  #scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Background Symbiodiniaceae", x = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-betadisp_symbiont
-```
-### Figure - Symbiodiniaceae
-```{r}
-ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("a.", "b."), common.legend = TRUE)
-# ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
-```
-
-## Clone
-### PCA clone
-```{r}
-# plot PCA
-clone_pca <- plot_ordination(ps.count.filt_clr, ps.count.filt_clr_euc, type="samples", 
-                color="Clone", shape = "Disease_on_colony_when_coring_binary") +
-  coord_fixed() +
-  facet_wrap(. ~ Clone) +
-  ggrepel::geom_text_repel(label = sample_data(ps.count.filt_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
-  labs(shape = "Disease at sampling")
-
-
-clone_pca$layers
-
-clone_pca$layers <- clone_pca$layers[-1]
-
-clone_pca_final <- clone_pca + geom_point(size=4, alpha=0.8)
-clone_pca_final
-
-# Conduct statistical tests on the clones 
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = count.euc_diss ~ Clone, data = count.clr_meta, permutations = 999) 
-
-# ggsave("../figures/PCA_clone.png", width = 6, height = 4)
-```
-## Location
-### PCA location
-```{r}
-# plot PCA
-location_pca <- plot_ordination(ps.count.filt_clr, ps.count.filt_clr_euc, type="samples", 
-                color="Location", shape = "Disease_on_colony_when_coring_binary") +
-  coord_fixed() +
-  labs(color = "Reef", shape = "Disease at sampling")
-
-location_pca$layers
-
-location_pca$layers <- location_pca$layers[-1]
-
-location_pca_final <- location_pca + geom_point(size=4, alpha=0.8)
-location_pca_final
-
-# Conduct statistical tests on the clones 
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = count.euc_diss ~ Location, data = count.clr_meta, permutations = 999) 
-
-# ggsave("../figures/PCA_reef.png", width = 6, height = 4)
-```
-
-
-## Disease at sampling
-### PCA disease at sampling
-```{r}
-sample_data(ps.count.filt_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.count.filt_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# plot PCA
-disease_pca <- plot_ordination(ps.count.filt_clr, ps.count.filt_clr_euc, type="samples", 
-                color="Disease_on_colony_when_coring_binary", 
-                shape ="Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  labs(color = "Disease at sampling", shape = "Disease at sampling") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A"))
-disease_pca
-
-# Conduct statistical tests on the clones 
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = count.euc_diss ~ Disease_on_colony_when_coring_binary, data = count.clr_meta, permutations = 999) 
-
-# ggsave("../figures/PCA_disease_binary.png", width = 6, height = 4)
-```
-
-### betadisper disease at sampling
-```{r}
-# Run betadisper function from vegan
-# Hypothesis - Colony fate explains the variability in the functional microbiome
-disp.disease <- betadisper(count.euc_diss, count.clr_meta$Disease_on_colony_when_coring_binary)
-
-# save the distances and combine with metadata
-distances <- disp.disease$distances
-disp.disease.meta <- cbind(distances, count.clr_meta)
-
-# Are the data normally distributed in each group?
-ggqqplot(disp.disease.meta$distances) # not normal looking
-shapiro.test(disp.disease.meta$distances) # data not normal
-
-# Do a Kruskal-Wallis test (nonparametric) to see if there are significant differences in the dispersion by fate
-# My question: Is there a significant difference in dispersion between fate groups?
-kruskal.test(distances ~ Disease_on_colony_when_coring_binary, data = disp.disease.meta)
-
-# Using the Wilcoxon rank sum test to examine if there is a significant difference between unaffected and diseased coral microbiomes:
-wilcox.test(distances ~ Disease_on_colony_when_coring_binary, 
-            data = disp.disease.meta) 
-
-# Set levels
-disp.disease.meta$Disease_on_colony_when_coring_binary <- factor(disp.disease.meta$Disease_on_colony_when_coring_binary, 
-                                                                 levels = c("Unaffected", "Diseased"))
-
-# Plot the results
-betadisp_disease <- ggplot(disp.disease.meta, aes(x = Disease_on_colony_when_coring_binary, 
-                                                  y = distances)) +
-  geom_boxplot(lwd = 0.5, outlier.shape = NA) +
-  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Disease_on_colony_when_coring_binary, 
-                  shape = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  ylab("Distance to Centroid") +
-  theme(legend.text.align = 0) +
-  #scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Background Symbiodiniaceae", x = "Disease at sampling", shape = "Disease at sampling") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A"))
-
-
-betadisp_disease
-```
-
-### Figure - Disease at sampling
-```{r}
-ggarrange(disease_pca, betadisp_disease, labels = c("a.", "b."), common.legend = TRUE)
-# ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
-```
-
-## Figure - disease at sampling and symbiodiniaceae
-```{r}
-ggarrange(ggarrange(disease_pca, betadisp_disease, 
-                    labels = c("a.", "b."), common.legend = TRUE), 
-          ggarrange(symbiont_pca_final, betadisp_symbiont, 
-                    labels = c("c.", "d."), common.legend = TRUE, legend = "bottom"), 
-          nrow = 2)
-ggsave("../figures/PCA_disease_symbiont.pdf", width = 8, height = 8)
-```
-
-# Beta Diversity - Bacteria only 
-Since we are ultimately doing so many filtering steps to remove eukaryotic genetic signatures, it doesn't make sense to include them in the permanova and PCA-based analyses. I will first filter out to the taxa annotated, then to the taxa annotated as bacteria or archaea. 
-
-I am going to do this over two steps. 
-1. I will filter the taxa (`prune_taxa`) using only the taxa that were annotated functionally or taxonomically
-2. Further filter the taxa by those that were annotated to bacteria or archaea (remove any "root" annotations or unclassified annotations)
-
-## manipulate data
-```{r}
-ps.count <- readRDS("../data/FLK_coassembly_phyloseq_count.rds")
-```
-
-Manipulate that function file to only show prok. taxonomic IDs. 
-```{r}
-prok_only_fxn <- fxn %>%
-  separate(max_annot_lvl, 
-           into = c("id", "max_level"), 
-           sep = "[|]", remove = FALSE) %>%
-  filter(!(max_level %in% c("Eukaryota", "Metazoa", "Fungi", "-"))) %>%
-  separate(eggNOG_OGs, 
-           into = c("eggnog_ID", "root", "Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
-           sep = "[|]", remove = FALSE) %>% # Soe taxa have two roots, so need to get id of the first Domain column, then columns in Phylum that have Eukaryotes
-  separate(Domain, into = c("actual_domain"), sep = ",") %>%
-  filter(actual_domain != "Eukaryota") %>%
-  separate(Phylum, into = c("actual_phylum"), sep = ",") %>%
-  filter(actual_phylum != "Eukaryota") %>% 
-  separate(Class, into = c("actual_class"), sep = ",") %>%
-  filter(actual_class != "Eukaryota") %>%
-  separate(Order, into = c("actual_order"), sep = ",") %>%
-  filter(actual_order != "Eukaryota") %>%
-  separate(Family, into = c("actual_family"), sep = ",")
-
-# Are there any eukaryotes left? NO!
-prok_only_fxn$actual_family %>% unique %>% sort
-
-# what about in the "root" classification? NO!
-prok_only_fxn %>% 
-  filter(actual_family == "root") %>%
-  dplyr::select(eggNOG_OGs) %>%
-  View
-
-#Make a list of only the contig/gene ids since I will use that to filter the phyloseq object
-fxn_prok_genes <- prok_only_fxn$query
-```
-
-Manipulate the taxa file to only show prok. taxonomic IDs. Keep a list of the contig/gene ids. 
-```{r}
-prok_taxa <- taxa %>%
-  separate(complete_classification, 
-           into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
-           sep = "[;]", remove = FALSE) %>% 
-  dplyr::filter(annotation != "unclassified") %>%
-  dplyr::filter(Domain != "-_root")
-
-# Check what types of annotations I have (yay, no root or eukaryotes!)
-prok_taxa$Domain %>% unique %>% sort
-
-# save a list of the gene/contig ids
-taxa_prok_genes <- prok_taxa$contig
-```
-
-
-Now I need to put the lists together and prune the LARGE 2.3 million gene count table to only the genes that had some sort of bacterial annotation (either functional or taxonomic)
-
-```{r}
-taxa_fxn_prok_genes <- c(taxa_prok_genes, fxn_prok_genes) #172,214 genes. There may be repeats
-
-ps.count.prok <- prune_taxa(taxa_fxn_prok_genes, ps.count)
-ps.count.prok
-```
-
-Looks like this filtered the dataset down to 130,806 taxa that was annotated as bacteria/archaea or was functionally annotated as from bacteria/archaea. 
-
-# Transform prok-only data
-
-Should I clr-transform the data before or after the filtering. Start with trying it after the taxa filtering. 
-```{r}
-# transform the data using centered log-ratio transformations
-ps.count.prok_clr <- microbiome::transform(ps.count.prok, 'clr')
-
-# Generate aitchison distance ordination (euclidean distance on clr-transformed data)
-ps.count.prok_clr_euc <- ordinate(ps.count.prok_clr, "RDA", "euclidean")
-
-# Generate aitchison distance dissimilarity matrix with vegan for adonis2 test
-prok.clr_meta <- as(sample_data(ps.count.prok_clr), "data.frame")
-prok.clr_otu <- otu_table(ps.count.prok_clr) %>% as.matrix %>% t() #samples must be rows, so transpose
-
-#get dissimilarity matrix 
-prok.euc_diss <- vegdist(prok.clr_otu, method = "euclidean")
-```
-
-## Fate - prok
-### PCA fate
-```{r}
-sample_data(ps.count.prok_clr)$Fate_after_SP1 <- 
-              factor(sample_data(ps.count.prok_clr)$Fate_after_SP1, 
-                                 levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
-
-# plot PCA - facet by fate
-pca_fate <- plot_ordination(ps.count.prok_clr, ps.count.prok_clr_euc, type="samples", 
-                color="Fate_after_SP1") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  facet_wrap(. ~ Fate_after_SP1) +
-  scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Colony Fate")
-pca_fate
-
-# plot PCA - facet by fate
-plot_ordination(ps.count.prok_clr, ps.count.prok_clr_euc, type="samples", 
-                color="Fate_after_SP1") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  facet_wrap(. ~ Fate_after_SP1) +
-  scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Colony Fate") +
-  ggrepel::geom_text_repel(label = sample_data(ps.count.prok_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6)
-
-# Conduct statistical tests on Fate 
-# Use the dissimilarity matrix from where you read in the ps object
-set.seed(10)
-adonis2(formula = prok.euc_diss ~ Fate_after_SP1, data = prok.clr_meta, permutations = 999) 
-```
-### pariwise permanova
-I would like to conduct a pairwise permanova, which refers to doing pairwise tests between the various groupings, rather than getting just an overall look at the data. 
-NOTE: Julie had to get a personal access token from GitHub to get the installation to work. I'll try without, then I'll get the token, which is like what I get for using github on the hipergator. 
-Pairwise permanova worked with installation using:
-```
-install.packages('devtools')
-library(devtools)
-install_github("pmartinezarbizu/pairwiseAdonis/pairwiseAdonis")
-```
-I think since I had a personal access token already, maybe it worked. 
-```{r}
-# Conduct statistical tests on Fate with the pairwise Permanova 
-# Use the dissimilarity matrix from where you read in the ps object
-set.seed(10)
-pairwise.Fate <- pairwise.adonis2(prok.euc_diss ~ Fate_after_SP1, data = prok.clr_meta, permutations = 999) 
-print(pairwise.Fate)
-
-set.seed(10)
-pairwise.Fate.zoox <- pairwise.adonis2(prok.euc_diss ~ Fate_after_SP1/Zoox_background, data = prok.clr_meta, strata = 'Zoox_background') 
-print(pairwise.Fate.zoox)
-
-pairwise.Fate.zoox <- pairwise.adonis2(prok.euc_diss ~ Fate_after_SP1/Zoox_background, data = prok.clr_meta) 
-print(pairwise.Fate.zoox)
-
-pairwise.Fate.zoox <- pairwise.adonis2(prok.euc_diss ~ Fate_after_SP1, data = prok.clr_meta, strata = 'Zoox_background') 
-print(pairwise.Fate.zoox)
-```
-
-
-### betadisper fate
-```{r}
-# Run betadisper function from vegan
-# Hypothesis - Colony fate explains the variability in the functional microbiome
-disp.fate <- betadisper(prok.euc_diss, prok.clr_meta$Fate_after_SP1)
-
-# save the distances and combine with metadata
-distances <- disp.fate$distances
-disp.fate.meta <- cbind(distances, prok.clr_meta)
-
-# Set the levels so the graphs match
-disp.fate.meta$Fate_after_SP1 <- factor(disp.fate.meta$Fate_after_SP1, levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
-
-# Are the data normally distributed in each group?
-ggqqplot(disp.fate.meta$distances) # not normal looking
-shapiro.test(disp.fate.meta$distances) # data not normal
-
-# Do a Kruskal-Wallis test (nonparametric) to see if there are significant differences in the dispersion by fate
-# My question: Is there a significant difference in dispersion between fate groups?
-kruskal.test(distances ~ Fate_after_SP1, data = disp.fate.meta)
-
-#Pairwise tests using the Wilcoxon rank sum test with Benjamini-Hochberg correction for multiple testing, which creates an adjusted P value:
-pairwise.wilcox.test(disp.fate.meta$distances, disp.fate.meta$Fate_after_SP1, p.adjust.method = "BH") 
-
-# Plot the results
-betadisp_fate <- ggplot(disp.fate.meta, aes(x = Fate_after_SP1, y = distances)) +
-  geom_boxplot(lwd = 1, outlier.shape = NA) +
-  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Fate_after_SP1), size = 4) +
-  ylab("Distance to Centroid") +
-  theme(legend.text.align = 0) +
-  scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Colony Fate", shape = "Reef", x = "Colony Fate")
-
-betadisp_fate
-```
-
-### Supp. Figure - Fate
-```{r}
-ggarrange(pca_fate, betadisp_fate, labels = c("a.", "b."), common.legend = TRUE)
-```
-
-### PCA fate subset
-```{r}
-# subset the unaffected and diseased fates (no recovered or will be diseased)
-ps.count.prok_clr_subset <- subset_samples(ps.count.prok_clr, Fate_after_SP1 %in% c("Unaffected", "Diseased"))
-
-# Generate aitchison distance ordination (euclidean distance on clr-transformed data)
-ps.count.prok_clr_euc_subset <- ordinate(ps.count.prok_clr_subset, "RDA", "euclidean")
-
-# Generate aitchison distance dissimilarity matrix with vegan for adonis2 test
-prok.clr_meta_subset <- as(sample_data(ps.count.prok_clr_subset), "data.frame")
-prok.clr_otu_subset <- otu_table(ps.count.prok_clr_subset) %>% as.matrix %>% t() #samples must be rows, so transpose
-
-#get dissimilarity matrix 
-prok.euc_diss_subset <- vegdist(prok.clr_otu_subset, method = "euclidean")
-
-sample_data(ps.count.prok_clr_subset)$Fate_after_SP1 <- 
-              factor(sample_data(ps.count.prok_clr_subset)$Fate_after_SP1, 
-                                 levels = c("Unaffected", "Diseased"))
-
-# plot PCA - facet by fate
-pca_fate <- plot_ordination(ps.count.prok_clr_subset, ps.count.prok_clr_euc_subset, type="samples", 
-                color="Fate_after_SP1") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  scale_color_manual(values = c("#648FFF", "#DC267F")) +
-  labs(color = "Colony Fate")
-pca_fate
-
-# Conduct statistical tests on Fate 
-# Use the dissimilarity matrix from where you read in the ps object
-set.seed(10)
-adonis2(formula = prok.euc_diss_subset ~ Fate_after_SP1, data = prok.clr_meta_subset, permutations = 999) 
-```
-
-## Symbiodiniaceae - zoox
-### PCA symbiont
-```{r}
-sample_data(ps.count.prok_clr)$Zoox_background <- factor(sample_data(ps.count.prok_clr)$Zoox_background, levels = c("none", "C", "CD", "D"))
-sample_data(ps.count.prok_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.count.prok_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# plot PCA with labels to see which corals are farther apart
-plot_ordination(ps.count.prok_clr, ps.count.prok_clr_euc, type="samples", 
-                color="Zoox_background", shape = "Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  ggrepel::geom_text_repel(label = sample_data(ps.count.prok_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
-  labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-# without the labels - want transparency
-symbiont_pca <- plot_ordination(ps.count.prok_clr, ps.count.prok_clr_euc, type="samples", 
-                color="Zoox_background", shape = "Disease_on_colony_when_coring_binary") +
-  coord_fixed() +
-  labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-symbiont_pca$layers
-
-symbiont_pca$layers <- symbiont_pca$layers[-1]
-
-symbiont_pca_final <- symbiont_pca + geom_point(size=4, alpha=0.8)
-symbiont_pca_final
-
-# Conduct statistical tests on the background symbiont
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = prok.euc_diss ~ Zoox_background, data = prok.clr_meta, permutations = 999) 
-
-#ggsave("../figures/PCA_zoox.png", width = 6, height = 4)
-```
-Note that for the symbiodiniaceae results, sample 3421 is the one colony with a dominant genus different (cladocopium) than all the others (breviolum). That coral is all the way out on its own in terms of a functional microbiome and was also consistently diseased. 
-
-### betadisper symbiont
-```{r}
-# Run betadisper function from vegan
-# Hypothesis - Colony fate explains the variability in the functional microbiome
-disp.symbiont <- betadisper(prok.euc_diss, prok.clr_meta$Zoox_background)
-
-# save the distances and combine with metadata
-distances <- disp.symbiont$distances
-disp.symbiont.meta <- cbind(distances, prok.clr_meta)
-
-# Set the levels so the graphs match
-disp.symbiont.meta$Zoox_background <- factor(disp.symbiont.meta$Zoox_background, levels = c("none", "C", "CD", "D"))
-disp.symbiont.meta$Disease_on_colony_when_coring_binary <-
-  factor(disp.symbiont.meta$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# Are the data normally distributed in each group?
-ggqqplot(disp.symbiont.meta$distances) # not normal looking
-shapiro.test(disp.symbiont.meta$distances) # data not normal
-
-# Do a Kruskal-Wallis test (nonparametric) to see if there are significant differences in the dispersion by fate
-# My question: Is there a significant difference in dispersion between fate groups?
-kruskal.test(distances ~ Zoox_background, data = disp.symbiont.meta)
-
-#Pairwise tests using the Wilcoxon rank sum test with Benjamini-Hochberg correction for multiple testing, which creates an adjusted P value:
-pairwise.wilcox.test(disp.symbiont.meta$distances, disp.symbiont.meta$Zoox_background, p.adjust.method = "BH") 
-
-# Plot the results
-betadisp_symbiont <- ggplot(disp.symbiont.meta, aes(x = Zoox_background, y = distances)) +
-  geom_boxplot(lwd = 0.5, outlier.shape = NA) +
-  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Zoox_background, shape = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  ylab("Distance to Centroid") +
-  theme(legend.text.align = 0) +
-  #scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Background Symbiodiniaceae", x = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-betadisp_symbiont
-```
-### Figure - Symbiodiniaceae
-```{r}
-ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("a.", "b."), common.legend = TRUE)
-# ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
-```
-
-## Symbiodin. Remove 3421
-Adjust the phyloseq object to not have the 3421 coral sample. Re-do the clr-transformations and such. 
-```{r}
-ps.count.prok.3421rm <- subset_samples(ps.count.prok, CoralID != "3421")
-
-# transform the data using centered log-ratio transformations
-ps.count.prok.3421rm_clr <- microbiome::transform(ps.count.prok.3421rm, 'clr')
-
-# Generate aitchison distance ordination (euclidean distance on clr-transformed data)
-ps.count.prok.3421rm_clr_euc <- ordinate(ps.count.prok.3421rm_clr, "RDA", "euclidean")
-
-# Generate aitchison distance dissimilarity matrix with vegan for adonis2 test
-prok.clr.3421rm_meta <- as(sample_data(ps.count.prok.3421rm_clr), "data.frame")
-prok.clr.3421rm_otu <- otu_table(ps.count.prok.3421rm_clr) %>% as.matrix %>% t() #samples must be rows, so transpose
-
-#get dissimilarity matrix 
-prok.3421rm_euc_diss <- vegdist(prok.clr.3421rm_otu, method = "euclidean")
-```
-### PCA
-```{r}
-sample_data(ps.count.prok.3421rm_clr)$Zoox_background <- factor(sample_data(ps.count.prok.3421rm_clr)$Zoox_background, levels = c("none", "C", "CD", "D"))
-sample_data(ps.count.prok.3421rm_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.count.prok.3421rm_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# plot PCA with labels to see which corals are farther apart
-plot_ordination(ps.count.prok.3421rm_clr, ps.count.prok.3421rm_clr_euc, type="samples", 
-                color="Zoox_background", shape = "Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  ggrepel::geom_text_repel(label = sample_data(ps.count.prok.3421rm_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
-  labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-# without the labels - want transparency
-symbiont_pca <- plot_ordination(ps.count.prok.3421rm_clr, ps.count.prok.3421rm_clr_euc, type="samples", 
-                color="Zoox_background", shape = "Disease_on_colony_when_coring_binary") +
-  coord_fixed() +
-  labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-symbiont_pca$layers
-
-symbiont_pca$layers <- symbiont_pca$layers[-1]
-
-symbiont_pca_final <- symbiont_pca + geom_point(size=4, alpha=0.8)
-symbiont_pca_final
-
-# Conduct statistical tests on the background symbiont
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = prok.3421rm_euc_diss ~ Zoox_background, data = prok.clr.3421rm_meta, permutations = 999) 
-```
-### Betadisper
-```{r}
-# Run betadisper function from vegan
-# Hypothesis - Colony fate explains the variability in the functional microbiome
-disp.symbiont.3421rm <- betadisper(prok.3421rm_euc_diss, prok.clr.3421rm_meta$Zoox_background)
-
-# save the distances and combine with metadata
-distances <- disp.symbiont.3421rm$distances
-disp.symbiont.3421rm.meta <- cbind(distances, prok.clr.3421rm_meta)
-
-# Set the levels so the graphs match
-disp.symbiont.3421rm.meta$Zoox_background <- factor(disp.symbiont.3421rm.meta$Zoox_background, levels = c("none", "C", "CD", "D"))
-disp.symbiont.3421rm.meta$Disease_on_colony_when_coring_binary <-
-  factor(disp.symbiont.3421rm.meta$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# Are the data normally distributed in each group?
-ggqqplot(disp.symbiont.3421rm.meta$distances) # not normal looking
-shapiro.test(disp.symbiont.3421rm.meta$distances) # data not normal
-
-# Do a Kruskal-Wallis test (nonparametric) to see if there are significant differences in the dispersion by fate
-# My question: Is there a significant difference in dispersion between fate groups?
-kruskal.test(distances ~ Zoox_background, data = disp.symbiont.3421rm.meta)
-
-#Pairwise tests using the Wilcoxon rank sum test with Benjamini-Hochberg correction for multiple testing, which creates an adjusted P value:
-pairwise.wilcox.test(disp.symbiont.3421rm.meta$distances, disp.symbiont.3421rm.meta$Zoox_background, p.adjust.method = "BH") 
-
-# Plot the results
-betadisp_symbiont <- ggplot(disp.symbiont.3421rm.meta, aes(x = Zoox_background, y = distances)) +
-  geom_boxplot(lwd = 0.5, outlier.shape = NA) +
-  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Zoox_background, shape = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  ylab("Distance to Centroid") +
-  theme(legend.text.align = 0) +
-  #scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Background Symbiodiniaceae", x = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-betadisp_symbiont
-```
-### Figure - Symbiodiniaceae without 3421
-```{r}
-ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("a.", "b."), common.legend = TRUE)
-# ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
-```
-
-```{r}
-sample_data(ps.count.prok_clr)$Zoox_background <- factor(sample_data(ps.count.prok_clr)$Zoox_background, levels = c("none", "C", "CD", "D"))
-sample_data(ps.count.prok_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.count.prok_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# plot PCA with labels to see which corals are farther apart
-plot_ordination(ps.count.prok_clr, ps.count.prok_clr_euc, type="samples", 
-                color="Zoox_background", shape = "Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  ggrepel::geom_text_repel(label = sample_data(ps.count.prok_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
-  labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-# without the labels - want transparency
-symbiont_pca <- plot_ordination(ps.count.prok_clr, ps.count.prok_clr_euc, type="samples", 
-                color="Zoox_background", shape = "Disease_on_colony_when_coring_binary") +
-  coord_fixed() +
-  labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
-
-symbiont_pca$layers
-
-symbiont_pca$layers <- symbiont_pca$layers[-1]
-
-symbiont_pca_final <- symbiont_pca + geom_point(size=4, alpha=0.8)
-symbiont_pca_final
-
-# Conduct statistical tests on the background symbiont
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = prok.euc_diss ~ Zoox_background, data = prok.clr_meta, permutations = 999) 
-
-#ggsave("../figures/PCA_zoox.png", width = 6, height = 4)
-```
-
-
-
-## Disease - prok
-### PCA disease at sampling
-```{r}
-sample_data(ps.count.prok_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.count.prok_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# plot PCA
-disease_pca <- plot_ordination(ps.count.prok_clr, ps.count.prok_clr_euc, type="samples", 
-                color="Disease_on_colony_when_coring_binary", 
-                shape ="Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  labs(color = "Disease at sampling", shape = "Disease at sampling") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A"))
-disease_pca
-
-# Conduct statistical tests on the clones 
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = prok.euc_diss ~ Disease_on_colony_when_coring_binary, data = prok.clr_meta, permutations = 999) 
-
-# Do the adonis2 using strata to control for background symbiodiniaceae 
-# Code for this found at https://github.com/vegandevs/vegan/discussions/600 
-set.seed(10)
-stratatest <- with(prok.clr_meta, how(nperm = 999, blocks = Zoox_background))
-adonis2(prok.euc_diss ~ Disease_on_colony_when_coring_binary, data = prok.clr_meta, permutations = stratatest) 
-
-# ggsave("../figures/PCA_disease_binary.png", width = 6, height = 4)
-```
-
-### betadisper disease at sampling
-```{r}
-# Run betadisper function from vegan
-# Hypothesis - Colony fate explains the variability in the functional microbiome
-disp.disease <- betadisper(prok.euc_diss, prok.clr_meta$Disease_on_colony_when_coring_binary)
-
-# save the distances and combine with metadata
-distances <- disp.disease$distances
-disp.disease.meta <- cbind(distances, prok.clr_meta)
-
-# Are the data normally distributed in each group?
-ggqqplot(disp.disease.meta$distances) # not normal looking
-shapiro.test(disp.disease.meta$distances) # data not normal
-
-# Using the Wilcoxon rank sum test to examine if there is a significant difference between unaffected and diseased coral microbiomes. Need wilcox test becouse I have two groups. 
-wilcox.test(distances ~ Disease_on_colony_when_coring_binary, 
-            data = disp.disease.meta)
-
-disp.disease.meta.no1220 <- filter(disp.disease.meta, CoralID != "1220")
-wilcox.test.no1220 <- wilcox.test(distances ~ Disease_on_colony_when_coring_binary, 
-            data = disp.disease.meta.no1220)
-
-# Set levels
-disp.disease.meta$Disease_on_colony_when_coring_binary <- factor(disp.disease.meta$Disease_on_colony_when_coring_binary, 
-                                                                 levels = c("Unaffected", "Diseased"))
-
-# Plot the results
-betadisp_disease <- ggplot(disp.disease.meta, aes(x = Disease_on_colony_when_coring_binary, 
-                                                  y = distances)) +
-  geom_boxplot(lwd = 0.5, outlier.shape = NA) +
-  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Disease_on_colony_when_coring_binary, 
-                  shape = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  ylab("Distance to Centroid") +
-  theme(legend.text.align = 0) +
-  #scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Disease at sampling", x = "Disease at sampling", shape = "Disease at sampling") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  ggrepel::geom_text_repel(label = sample_data(ps.count.prok_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6)
-
-
-betadisp_disease
-```
-
-### Figure - Disease at sampling
-```{r}
-ggarrange(disease_pca, betadisp_disease, labels = c("a.", "b."), common.legend = TRUE)
-# ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
-```
-
-## Disease - no 1220
-Adjust the phyloseq object to not have the 1220 coral sample. Re-do the clr-transformations and such. 
-```{r}
-ps.count.prok.1220rm <- subset_samples(ps.count.prok, CoralID != "1220")
-
-# transform the data using centered log-ratio transformations
-ps.count.prok.1220rm_clr <- microbiome::transform(ps.count.prok.1220rm, 'clr')
-
-# Generate aitchison distance ordination (euclidean distance on clr-transformed data)
-ps.count.prok.1220rm_clr_euc <- ordinate(ps.count.prok.1220rm_clr, "RDA", "euclidean")
-
-# Generate aitchison distance dissimilarity matrix with vegan for adonis2 test
-prok.clr.1220rm_meta <- as(sample_data(ps.count.prok.1220rm_clr), "data.frame")
-prok.clr.1220rm_otu <- otu_table(ps.count.prok.1220rm_clr) %>% as.matrix %>% t() #samples must be rows, so transpose
-
-#get dissimilarity matrix 
-prok.1220rm_euc_diss <- vegdist(prok.clr.1220rm_otu, method = "euclidean")
-```
-
-### PCA disease at sampling
-```{r}
-sample_data(ps.count.prok.1220rm_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.count.prok.1220rm_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# plot PCA
-disease_pca <- plot_ordination(ps.count.prok.1220rm_clr, ps.count.prok.1220rm_clr_euc, type="samples", 
-                color="Disease_on_colony_when_coring_binary", 
-                shape ="Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  labs(color = "Disease at sampling", shape = "Disease at sampling") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A"))
-disease_pca
-
-# Conduct statistical tests on the clones 
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = prok.1220rm_euc_diss ~ Disease_on_colony_when_coring_binary, data = prok.clr.1220rm_meta, permutations = 999) 
-
-# ggsave("../figures/PCA_disease_binary.png", width = 6, height = 4)
-```
-
-### betadisper disease at sampling
-```{r}
-# Run betadisper function from vegan
-# Hypothesis - Colony fate explains the variability in the functional microbiome
-disp.disease.1220rm <- betadisper(prok.1220rm_euc_diss, prok.clr.1220rm_meta$Disease_on_colony_when_coring_binary)
-plot(disp.disease.1220rm)
-
-# save the distances and combine with metadata
-distances1220rm <- disp.disease.1220rm$distances
-disp.disease.1220rm.meta <- cbind(distances1220rm, prok.clr.1220rm_meta)
-
-# Are the data normally distributed in each group?
-ggqqplot(disp.disease.1220rm.meta$distances) # not normal looking
-shapiro.test(disp.disease.1220rm.meta$distances) # data not normal
-
-# Using the Wilcoxon rank sum test to examine if there is a significant difference between unaffected and diseased coral microbiomes. Need wilcox test becouse I have two groups. 
-wilcox.test(distances1220rm ~ Disease_on_colony_when_coring_binary, 
-            data = disp.disease.1220rm.meta) 
-
-# Set levels
-disp.disease.1220rm.meta$Disease_on_colony_when_coring_binary <- factor(disp.disease.1220rm.meta$Disease_on_colony_when_coring_binary, 
-                                                                 levels = c("Unaffected", "Diseased"))
-
-# Plot the results
-betadisp_disease <- ggplot(disp.disease.1220rm.meta, aes(x = Disease_on_colony_when_coring_binary, 
-                                                  y = distances1220rm)) +
-  geom_boxplot(lwd = 0.5, outlier.shape = NA) +
-  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Disease_on_colony_when_coring_binary, 
-                  shape = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  ylab("Distance to Centroid") +
-  theme(legend.text.align = 0) +
-  #scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
-  labs(color = "Disease at sampling", x = "Disease at sampling", shape = "Disease at sampling") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) 
- # ggrepel::geom_text_repel(label = sample_data(ps.count.prok.1220rm_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6)
-
-
-betadisp_disease
-```
-
-### Figure - Disease at sampling
-```{r}
-ggarrange(disease_pca, betadisp_disease, labels = c("a.", "b."), common.legend = TRUE)
-# ggsave("../figures/PCA_fate.pdf", width = 9, height = 5)
-```
-
-## Clone
-### PCA clone
-```{r}
-# plot PCA
-clone_pca <- plot_ordination(ps.count.prok_clr, ps.count.prok_clr_euc, type="samples", 
-                color="Clone", shape = "Disease_on_colony_when_coring_binary") +
-  coord_fixed() +
-  facet_wrap(. ~ Clone) +
-  ggrepel::geom_text_repel(label = sample_data(ps.count.prok_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
-  labs(shape = "Disease at sampling")
-
-
-clone_pca$layers
-
-clone_pca$layers <- clone_pca$layers[-1]
-
-clone_pca_final <- clone_pca + geom_point(size=4, alpha=0.8)
-clone_pca_final
-
-# Conduct statistical tests on the clones 
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = prok.euc_diss ~ Clone, data = prok.clr_meta, permutations = 999) 
-
-# ggsave("../figures/PCA_clone.png", width = 6, height = 4)
-```
-## Location
-### PCA location
-```{r}
-# plot PCA
-location_pca <- plot_ordination(ps.count.prok_clr, ps.count.prok_clr_euc, type="samples", 
-                color="Location", shape = "Disease_on_colony_when_coring_binary") +
-  coord_fixed() +
-  labs(color = "Reef", shape = "Disease at sampling")
-
-location_pca$layers
-
-location_pca$layers <- location_pca$layers[-1]
-
-location_pca_final <- location_pca + geom_point(size=4, alpha=0.8)
-location_pca_final
-
-# Conduct statistical tests on the clones 
-# Use the dissimilarity matrix from an earlier chunk
-set.seed(10)
-adonis2(formula = prok.euc_diss ~ Location, data = prok.clr_meta, permutations = 999) 
-
-# ggsave("../figures/PCA_reef.png", width = 6, height = 4)
-```
-
 
 # MS ANALYSIS - Prok ONLY
 
@@ -1109,8 +48,8 @@ I recently re-ran Salmon to get gene abundances on all the prokaryote genes. The
 prokreads <- read.table("../data/prok_FLK_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
 prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
 
-# Load metadata
-metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
+# Load metadata - Use updated metadata (v10 with new symbiont and treatment categories)
+metadata <- as.data.frame(read_excel("../data/RRC_sample_CoreSiteData_v10_RRCCoreData_SP1_Keys_OFAV.xlsx", na = "NA"))
 rownames(metadata) <- metadata$CoralID
 
 # how many genes are zero across all samples? Like 32k
@@ -1133,7 +72,7 @@ Start with a phyloseq object jsut with the count data (no annotation information
 ```{r}
 ## Make phyloseq object of count-related data 
 idx <- match(colnames(prokreads_nozero), rownames(metadata))
-metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced Florida Keys samples
+metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced Florida Keys samples, and no Orbicella franksi coral data. 
 
 NUMREADS = otu_table(prokreads_nozero, taxa_are_rows = TRUE)
 META = sample_data(metadata_prok)
@@ -1180,7 +119,7 @@ adonis2(formula = ps.prok.euc_diss ~ Zoox_composition_New, data = ps.prok.clr_me
 
 # disease at sampling
 set.seed(10)
-adonis2(formula = ps.prok.euc_diss ~ Disease_on_colony_when_coring_binary, data = ps.prok.clr_meta, permutations = 999) 
+adonis2(formula = ps.prok.euc_diss ~ Condition_At_Sampling, data = ps.prok.clr_meta, permutations = 999) 
 
 # clone
 set.seed(10)
@@ -1194,7 +133,7 @@ adonis2(formula = ps.prok.euc_diss ~ Location, data = ps.prok.clr_meta, permutat
 # Code for this found at https://github.com/vegandevs/vegan/discussions/600 
 set.seed(10)
 stratatest <- with(ps.prok.clr_meta, how(nperm = 999, blocks = Zoox_composition_New))
-adonis2(ps.prok.euc_diss ~ Disease_on_colony_when_coring_binary, data = ps.prok.clr_meta, permutations = stratatest) 
+adonis2(ps.prok.euc_diss ~ Condition_At_Sampling, data = ps.prok.clr_meta, permutations = stratatest) 
 
 # fate while controlling for symbiont composition
 set.seed(10)
@@ -1210,17 +149,17 @@ print(pairwise.prok.Fate.zoox)
 ## Disease - prok
 ### PCA disease at sampling
 ```{r}
-sample_data(ps.prok_clr)$Disease_on_colony_when_coring_binary <- 
-              factor(sample_data(ps.prok_clr)$Disease_on_colony_when_coring_binary, 
-                                 levels = c("Unaffected", "Diseased"))
+sample_data(ps.prok_clr)$Condition_At_Sampling <- 
+              factor(sample_data(ps.prok_clr)$Condition_At_Sampling , 
+                                 levels = c("Apparently Healthy", "Actively Diseased"))
 
 # plot PCA
 disease_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                color="Disease_on_colony_when_coring_binary", 
+                color="Condition_At_Sampling", 
                 shape ="Zoox_composition_New") +
   geom_point(size = 4) +
   coord_fixed() +
-  labs(color = "Disease at sampling", shape = "Symbiodiniaceae composition") +
+  labs(color = "Condition at sampling", shape = "Symbiodiniaceae composition") +
   scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
   scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
 
@@ -1235,10 +174,10 @@ disease_pca_2$layers
 disease_pca_2$layers <- disease_pca_2$layers[-1]
 
 disease_pca_final <- disease_pca_2 + 
-  geom_point(size=4, alpha = 0.9, aes(color = Disease_on_colony_when_coring_binary)) +
+  geom_point(size=4, alpha = 0.9, aes(color = Condition_At_Sampling)) +
   scale_shape_manual(values = c(16, 15, 17, 18, 3, 8)) +
   scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  labs(color = "Disease at sampling", shape = "Symbiodiniaceae composition")
+  labs(color = "Condition at sampling", shape = "Symbiodiniaceae composition")
 disease_pca_final
 ```
 
@@ -1246,7 +185,7 @@ disease_pca_final
 ```{r}
 # Run betadisper function from vegan
 # Hypothesis - Colony fate explains the variability in the functional microbiome
-disp.disease <- betadisper(ps.prok.euc_diss, ps.prok.clr_meta$Disease_on_colony_when_coring_binary)
+disp.disease <- betadisper(ps.prok.euc_diss, ps.prok.clr_meta$Condition_At_Sampling)
 
 # save the distances and combine with metadata
 distances <- disp.disease$distances
@@ -1257,31 +196,30 @@ ggqqplot(disp.disease.meta$distances) # not normal looking
 shapiro.test(disp.disease.meta$distances) # data not normal
 
 # Using the Wilcoxon rank sum test to examine if there is a significant difference between unaffected and diseased coral microbiomes. Need wilcox test becouse I have two groups. 
-wilcox.test(distances ~ Disease_on_colony_when_coring_binary, 
+wilcox.test(distances ~ Condition_At_Sampling, 
             data = disp.disease.meta)
 
 disp.disease.meta.no1220 <- filter(disp.disease.meta, CoralID != "1220")
-wilcox.test.no1220 <- wilcox.test(distances ~ Disease_on_colony_when_coring_binary, 
+wilcox.test.no1220 <- wilcox.test(distances ~ Condition_At_Sampling, 
             data = disp.disease.meta.no1220)
 wilcox.test.no1220
 
 # Set levels
-disp.disease.meta$Disease_on_colony_when_coring_binary <- 
-  factor(disp.disease.meta$Disease_on_colony_when_coring_binary, 
-                                                                 levels = c("Unaffected", "Diseased"))
+disp.disease.meta$Condition_At_Sampling <- 
+  factor(disp.disease.meta$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
 
 # Plot the results
-betadisp_disease <- ggplot(disp.disease.meta, aes(x = Disease_on_colony_when_coring_binary, 
+betadisp_disease <- ggplot(disp.disease.meta, aes(x = Condition_At_Sampling, 
                                                   y = distances)) +
   geom_boxplot(lwd = 0.5, outlier.shape = NA) +
   stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
   geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Disease_on_colony_when_coring_binary, 
+              aes(color = Condition_At_Sampling, 
                   shape = Zoox_composition_New), 
-              size = 4, alpha = 0.9) +
+              size = 5, alpha = 0.9) +
   ylab("Distance to Centroid") +
   theme(legend.text.align = 0) +
-  labs(color = "Disease at sampling", x = "Disease at sampling", shape = "Symbiodiniaceae composition") +
+  labs(color = "Condition at sampling", x = "Condition at sampling", shape = "Symbiodiniaceae composition") +
   scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
   scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
 
@@ -1291,7 +229,28 @@ betadisp_disease
 ### Figure - Disease at sampling
 ```{r}
 ggarrange(disease_pca_final, betadisp_disease, labels = c("a.", "b."), common.legend = TRUE, legend = "right", widths = c(2,1))
-ggsave("../figures/PCA_disease_at_sampling_ZooxNew.pdf", width = 10, height = 5)
+#ggsave("../figures/PCA_disease_at_sampling_ZooxNew.pdf", width = 10, height = 5)
+
+### POTENTIAL NEW FIGURE FOR MAIN MS
+disp.disease.meta$Fate_after_SP1 <- 
+              factor(disp.disease.meta$Fate_after_SP1, 
+                                 levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
+
+betadisp_disease_new <- ggplot(disp.disease.meta, aes(x = Condition_At_Sampling, 
+                                                  y = distances)) +
+  geom_boxplot(lwd = 0.5, outlier.shape = NA) +
+  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
+  geom_jitter(position=position_jitter(width=.1, height=0), 
+              aes(fill = Fate_after_SP1, 
+                  shape = Condition_At_Sampling), 
+              size = 5, alpha = 0.9) +
+  ylab("Distance to Centroid") +
+  theme(legend.text.align = 0) +
+  labs(color = "Condition at sampling", x = "Condition at sampling", shape = "Condition at sampling") +
+  scale_fill_manual(values = c("#482173", "#2e6f8e",  "#29af7f", "#FFC20A")) +
+  scale_shape_manual(values = c(21, 24))
+
+betadisp_disease_new
 ```
 
 ## Fate - prok
@@ -1300,12 +259,12 @@ ggsave("../figures/PCA_disease_at_sampling_ZooxNew.pdf", width = 10, height = 5)
 sample_data(ps.prok_clr)$Fate_after_SP1 <- 
               factor(sample_data(ps.prok_clr)$Fate_after_SP1, 
                                  levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
-sample_data(ps.prok_clr)$Disease_on_colony_when_coring_binary <- 
-              factor(sample_data(ps.prok_clr)$Disease_on_colony_when_coring_binary, 
-                                 levels = c("Unaffected", "Diseased"))
+sample_data(ps.prok_clr)$Condition_At_Sampling <- 
+              factor(sample_data(ps.prok_clr)$Condition_At_Sampling, 
+                                 levels = c("Apparently Healthy", "Actively Diseased"))
 
 fate_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                shape = "Disease_on_colony_when_coring_binary") +
+                shape = "Condition_At_Sampling") +
   coord_fixed() 
  # scale_color_manual(values = c("black", "black", "black", "black"))
  # scale_color_manual(values = c("gray40", "black",  "gray70", "gray90"))
@@ -1315,10 +274,10 @@ fate_pca$layers
 fate_pca$layers <- fate_pca$layers[-1]
 
 fate_pca_final <- fate_pca + 
-  geom_point(size=4, aes(fill = Fate_after_SP1)) +
+  geom_point(size=5, aes(fill = Fate_after_SP1)) +
   scale_shape_manual(values = c(21, 24)) +
   scale_fill_manual(values = c("gray40", "black",  "gray70", "gray90")) +
-  labs(fill = "Colony Fate", shape = "Disease at sampling")
+  labs(fill = "Colony Fate", shape = "Condition at sampling")
 fate_pca_final
 ```
 ### betadisper fate
@@ -1333,8 +292,8 @@ disp.fate.meta <- cbind(distances, ps.prok.clr_meta)
 
 # Set the levels so the graphs match
 disp.fate.meta$Fate_after_SP1 <- factor(disp.fate.meta$Fate_after_SP1, levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
-disp.fate.meta$Disease_on_colony_when_coring_binary <- factor(disp.fate.meta$Disease_on_colony_when_coring_binary, 
-                                                              levels = c("Unaffected", "Diseased"))
+disp.fate.meta$Condition_At_Sampling <- factor(disp.fate.meta$Condition_At_Sampling, 
+                                                              levels = c("Apparently Healthy", "Actively Diseased"))
 
 # Are the data normally distributed in each group?
 ggqqplot(disp.fate.meta$distances) # not normal looking
@@ -1352,13 +311,12 @@ betadisp_fate <- ggplot(disp.fate.meta, aes(x = Fate_after_SP1, y = distances)) 
   geom_boxplot(lwd = 1, outlier.shape = NA) +
   stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
   geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(fill = Fate_after_SP1, shape = Disease_on_colony_when_coring_binary), size = 4) +
+              aes(fill = Fate_after_SP1, shape = Condition_At_Sampling), size = 5) +
   ylab("Distance to Centroid") +
   theme(legend.text.align = 0) +
   scale_shape_manual(values = c(21, 24)) +
- # scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
   scale_fill_manual(values = c("gray40", "black",  "gray70", "gray90")) +
-  labs(fill = "Colony Fate", shape = "Disease at sampling", x = "Colony Fate")
+  labs(fill = "Colony Fate", shape = "Condition at sampling", x = "Colony Fate")
 
 betadisp_fate
 ```
@@ -1366,7 +324,41 @@ betadisp_fate
 ### Supp. Figure - Fate
 ```{r}
 ggarrange(fate_pca_final, betadisp_fate, labels = c("a.", "b."), common.legend = TRUE, legend = "right")
-ggsave("../figures/PCA_fate.pdf", width = 11, height = 5)
+#ggsave("../figures/PCA_fate.pdf", width = 11, height = 5)
+
+### ALTERNATE FOR MAIN FIGURE
+betadisp_fate_new <- ggplot(disp.fate.meta, aes(x = Fate_after_SP1, y = distances)) +
+  geom_boxplot(lwd = 1, outlier.shape = NA) +
+  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
+  geom_jitter(position=position_jitter(width=.1, height=0), 
+              aes(fill = Fate_after_SP1, shape = Condition_At_Sampling), size = 5) +
+  ylab("Distance to Centroid") +
+  theme(legend.text.align = 0) +
+  scale_shape_manual(values = c(21, 24)) +
+  scale_fill_manual(values = c("#482173", "#2e6f8e",  "#29af7f", "#FFC20A")) +
+  labs(fill = "Colony Fate", shape = "Condition at sampling", x = "Colony Fate")
+
+betadisp_fate_new
+
+fate_pca_new <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
+                shape = "Condition_At_Sampling") +
+  coord_fixed() 
+ # scale_color_manual(values = c("black", "black", "black", "black"))
+ # scale_color_manual(values = c("gray40", "black",  "gray70", "gray90"))
+
+fate_pca_new$layers
+
+fate_pca_new$layers <- fate_pca_new$layers[-1]
+
+fate_pca_final_new <- fate_pca_new + 
+  geom_point(size=5, aes(fill = Fate_after_SP1)) +
+  scale_shape_manual(values = c(21, 24)) +
+  scale_fill_manual(values = c("#482173", "#2e6f8e",  "#29af7f", "#FFC20A")) +
+  labs(fill = "Colony Fate", shape = "Condition at sampling")
+fate_pca_final_new
+
+ggarrange(fate_pca_final_new, betadisp_fate_new, betadisp_disease_new, labels = c("a.", "b.", "c."), common.legend = TRUE, legend = "right", widths = c(2,1.5,1), nrow = 1)
+ggsave("../figures/PCA_fate_condition_combine.pdf", width = 13, height = 5)
 ```
 
 ## Symbiodiniaceae - zoox
@@ -1376,29 +368,30 @@ It is the `Zoox_composition_New` grouping.
 
 ### PCA symbiont
 ```{r}
-sample_data(ps.prok_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.prok_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
+sample_data(ps.prok_clr)$Condition_At_Sampling <- factor(sample_data(ps.prok_clr)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
 
 # plot PCA with labels to see which corals are farther apart
 plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                color="Zoox_composition_New", shape = "Disease_on_colony_when_coring_binary") +
+                color="Zoox_composition_New", shape = "Condition_At_Sampling") +
   geom_point(size = 4) +
   coord_fixed() +
   scale_color_brewer(palette = "Dark2") +
   ggrepel::geom_text_repel(label = sample_data(ps.prok_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
-  labs(color = "Symbiodiniaceae composition", shape = "Disease at sampling")
+  labs(color = "Symbiodiniaceae composition", shape = "Condition at sampling")
 
 # without the labels - want transparency
 symbiont_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                color="Zoox_composition_New", shape = "Disease_on_colony_when_coring_binary") +
-  coord_fixed() +
-  scale_color_brewer(palette = "Dark2") +
-  labs(color = "Symbiodiniaceae composition", shape = "Disease at sampling")
+                shape = "Condition_At_Sampling") +
+  coord_fixed() 
 
 symbiont_pca$layers
-
 symbiont_pca$layers <- symbiont_pca$layers[-1]
 
-symbiont_pca_final <- symbiont_pca + geom_point(size=4, alpha = 0.9)
+symbiont_pca_final <- symbiont_pca + 
+  geom_point(size=5, alpha = 0.9, aes(fill = Zoox_composition_New)) +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_shape_manual(values = c(21, 24)) +
+  labs(fill = "Symbiodiniaceae composition", shape = "Condition at sampling")
 symbiont_pca_final
 ```
 Note that for the symbiodiniaceae results, sample 3421 is the one colony with a dominant genus different (cladocopium) than all the others (breviolum). That coral is all the way out on its own in terms of a functional microbiome and was also consistently diseased. 
@@ -1414,8 +407,8 @@ distances <- disp.symbiont$distances
 disp.symbiont.meta <- cbind(distances, ps.prok.clr_meta)
 
 # Set the levels so the graphs match
-disp.symbiont.meta$Disease_on_colony_when_coring_binary <-
-  factor(disp.symbiont.meta$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
+disp.symbiont.meta$Condition_At_Sampling <-
+  factor(disp.symbiont.meta$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
 
 # Remove sample 3421 (BD symbionts) and 689 (CD symbionts) because there is only one sample in each grouping
 disp.symbiont.meta.no3421or689 <- filter(disp.symbiont.meta, CoralID != "3421")
@@ -1435,7 +428,7 @@ kruskal.test(distances ~ Zoox_composition_New, data = disp.symbiont.meta.no3421o
 pairwise.wilcox.test(disp.symbiont.meta.no3421or689$distances, disp.symbiont.meta.no3421or689$Zoox_composition_New, p.adjust.method = "BH") 
 
 # NEED TO DO AN ANOVA BECAUSE DATA ARE NORMAL
-zoox_aov <- aov(distances ~ Zoox_composition_New, data = disp.symbiont.meta.no3421)
+zoox_aov <- aov(distances ~ Zoox_composition_New, data = disp.symbiont.meta.no3421or689)
 
 summary(zoox_aov)
 
@@ -1446,20 +439,23 @@ betadisp_symbiont <- ggplot(disp.symbiont.meta.no3421or689, aes(x = Zoox_composi
   geom_boxplot(lwd = 0.5, outlier.shape = NA) +
   stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
   geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Zoox_composition_New, shape = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.9) +
+              aes(fill = Zoox_composition_New, shape = Condition_At_Sampling), 
+              size = 5, alpha = 0.9) +
   ylab("Distance to Centroid") +
   theme(legend.text.align = 0) +
-  scale_color_brewer(palette = "Dark2") +
-  labs(color = "Symbiodiniaceae composition", x = "Symbiodiniaceae composition", shape = "Disease at sampling")
+  scale_fill_brewer(palette = "Dark2") +
+    scale_shape_manual(values = c(21, 24)) +
+  labs(fill = "Symbiodiniaceae composition", x = "Symbiodiniaceae composition", shape = "Condition at sampling")
 
 betadisp_symbiont
 ```
 ### Figure - Symbiodiniaceae
 ```{r}
-ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("c.", "d."), common.legend = TRUE, legend = "right")
-ggsave("../figures/PCA_zoox_composition_ZooxNew.pdf", width = 12, height = 5)
+ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("d.", "e."), common.legend = TRUE, legend = "right")
+ggsave("../figures/PCA_zoox_composition_ZooxNew_Condition.pdf", width = 12, height = 5)
 ```
+### MS FIGURE - Fate + Disease at sampling combined
+
 
 ## Clone & Location
 
@@ -1467,12 +463,12 @@ ggsave("../figures/PCA_zoox_composition_ZooxNew.pdf", width = 12, height = 5)
 ```{r}
 # plot PCA
 clone_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                color="Clone", shape = "Disease_on_colony_when_coring_binary") +
+                color="Clone", shape = "Condition_At_Sampling") +
   coord_fixed() +
   geom_point(size = 4) +
   facet_wrap(. ~ Clone) +
   ggrepel::geom_text_repel(label = sample_data(ps.prok_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
-  labs(shape = "Disease at sampling") +
+  labs(shape = "Condition at sampling") +
   theme(legend.position = "right")
 ```
 
@@ -1480,9 +476,9 @@ clone_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples",
 ```{r}
 # plot PCA
 location_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                color="Location", shape = "Disease_on_colony_when_coring_binary") +
+                color="Location", shape = "Condition_At_Sampling") +
   coord_fixed() +
-  labs(color = "Reef", shape = "Disease at sampling") +
+  labs(color = "Reef", shape = "Condition at sampling") +
   geom_point(size = 4) +
   theme(legend.position = "bottom")
 ```
@@ -1490,5 +486,5 @@ location_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples",
 ### Figures together - SUPPLEMENT
 ```{r}
 ggarrange(clone_pca, location_pca, labels = c("a.", "b."), widths = c(2,1))
-ggsave("../figures/PCA_reef_clone.pdf", width = 13, height = 5)
+#ggsave("../figures/PCA_reef_clone.pdf", width = 13, height = 5)
 ```

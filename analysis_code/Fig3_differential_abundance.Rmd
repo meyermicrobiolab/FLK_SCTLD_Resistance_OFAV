@@ -387,7 +387,7 @@ ggplot(dis.unaff.prok, aes(x = corncob_result, fill = Class)) +
   scale_fill_manual(values = x1)
 ```
 
-# MS ANALYSIS - KEGG Diff. Abundance
+# MS ANALYSIS - KEGG Diff. Abundance - Disease vs. Healthy
 
 I want to analyze the differentially abunant genes of only annotated (by KEGG) the microbial genes that were annotated. 
 
@@ -1129,6 +1129,8 @@ ggplot(sig.nonmetab.genes.KO.subsetforgraph.tax, aes(x = Estimate, y = Level4)) 
   labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology") +  
   geom_vline(xintercept = 0, linetype = "dashed")
 ```
+
+# MS ANALYSIS - FATE
 
 
 # MS FIGURES
