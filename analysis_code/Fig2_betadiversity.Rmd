@@ -358,7 +358,7 @@ fate_pca_final_new <- fate_pca_new +
 fate_pca_final_new
 
 ggarrange(fate_pca_final_new, betadisp_fate_new, betadisp_disease_new, labels = c("a.", "b.", "c."), common.legend = TRUE, legend = "right", widths = c(2,1.5,1), nrow = 1)
-ggsave("../figures/PCA_fate_condition_combine.pdf", width = 13, height = 5)
+#ggsave("../figures/PCA_fate_condition_combine.pdf", width = 13, height = 5)
 ```
 
 ## Symbiodiniaceae - zoox
@@ -452,7 +452,7 @@ betadisp_symbiont
 ### Figure - Symbiodiniaceae
 ```{r}
 ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("d.", "e."), common.legend = TRUE, legend = "right")
-ggsave("../figures/PCA_zoox_composition_ZooxNew_Condition.pdf", width = 12, height = 5)
+#ggsave("../figures/PCA_zoox_composition_ZooxNew_Condition.pdf", width = 12, height = 5)
 ```
 ### MS FIGURE - Fate + Disease at sampling combined
 
@@ -486,5 +486,5 @@ location_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples",
 ### Figures together - SUPPLEMENT
 ```{r}
 ggarrange(clone_pca, location_pca, labels = c("a.", "b."), widths = c(2,1))
-#ggsave("../figures/PCA_reef_clone.pdf", width = 13, height = 5)
+ggsave("../figures/PCA_reef_clone_Jul25.pdf", width = 13, height = 5)
 ```

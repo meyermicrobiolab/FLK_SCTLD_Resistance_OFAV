@@ -37,355 +37,6 @@ theme_set(theme_bw())
 library(patchwork)
 ```
 
-# Read in data
-
-## Load raw data 
-
-```{r}
-# Load table with count abundances from salmon ("numreads")
-numreads <- read.table("../data/FLK_coassembly_salmon_quant_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
-numreads <- numreads[, -1] # get rid of the first column cause it is just numbered lines
-
-# Load the table with taoxnomic information from mmseqs2
-taxa <- read.table("../data/FLK_coassembly_tax_mmseqs2_lca.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
-
-# Load the table with functional information from eggnog mapper
-fxn <- read_excel("../data/FLK_coassembly_fxn_eggnog.xlsx", skip = 2, na = "-")
-
-# Load metadata
-metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
-rownames(metadata) <- metadata$CoralID
-
-# how many contigs are zero across all samples?
-table(rowSums(numreads) == 0)
-
-# remove them
-numreads_nozero <- numreads[rowSums(numreads) != 0, ]
-dim(numreads_nozero)
-
-# any samples with no reads?
-table(colSums(numreads_nozero) == 0)
-
-# Fix the sample names
-colnames(numreads_nozero) <- str_replace_all(colnames(numreads_nozero), pattern = "[X]", "")
-colnames(numreads_nozero) <- str_split_i(colnames(numreads_nozero), "[_]", 1)
-```
-
-## Phyloseq object 
-```{r}
-idx <- match(colnames(numreads_nozero), rownames(metadata))
-metadata_3 <- metadata[idx,]
-
-NUMREADS = otu_table(numreads_nozero, taxa_are_rows = TRUE)
-META = sample_data(metadata_3)
-
-ps.count <- phyloseq(NUMREADS, META)
-ps.count
-```
-
-## Annotated genes only
-I would like to filter this phyloseq object to only include genes that are annotated. My rationale is that if I am to pull out any discussion or prediction about functional potential of the differentially abundant genes, then it would be useful to have that be what I do the analysis with. 
-```{r}
-numreads_nozero_for_fxn_filt <- numreads_nozero %>%
-  mutate(query = rownames(numreads_nozero))
-
-# Add count (number of reads) to the function data frame
-fxn.numreads_nozero <- fxn %>%
-  left_join(numreads_nozero_for_fxn_filt, by = "query")
-
-fxn.numreads_nozero
-
-# Select out only the reads again
-numreads_nozero_annotated_only <- as.data.frame(fxn.numreads_nozero[,22:62])
-rownames(numreads_nozero_annotated_only) <- fxn.numreads_nozero$query
-
-# It has occurrred to me that some of these annotations are actually missing from the abundance table so are showing up as NAs. I need to remove those samples. 
-table(is.na(rowSums(numreads_nozero_annotated_only)))
-table(is.finite(rowSums(numreads_nozero_annotated_only)))
-
-numreads_nozero_annotated_only_noNA <-
-  numreads_nozero_annotated_only[is.finite(rowSums(numreads_nozero_annotated_only)), ]
-
-numreads_nozero_annotated_only_noNA %>% dim
-
-# Make the actual phyloseq object
-idx <- match(colnames(numreads_nozero_annotated_only_noNA), metadata$CoralID)
-metadata_annotated <- metadata[idx,]
-
-NUMREADS = otu_table(numreads_nozero_annotated_only_noNA, taxa_are_rows = TRUE)
-META = sample_data(metadata_annotated)
-
-ps.count.annotated <- phyloseq(NUMREADS, META)
-ps.count.annotated
-```
-This drastically reduced the number of genes I am working with, which makes sense. Ultimately, I am only doing annotated genes because I want to be able to draw biological conclusions from the data. 
-
-## Save PS annotated object
-```{r}
-saveRDS(ps.count.annotated, "../data/FLK_coassembly_phyloseq_count.annotated.rds")
-```
-
-## Quick start - load ps object
-```{r}
-# Now what is it like to read this back in?
-ps.count.annotated <- readRDS("../data/FLK_coassembly_phyloseq_count.annotated.rds")
-```
-
-# Differential abundance 
-## deseq2 using the following code:
-Set the levels of the factor of interest
-```{r}
-sample_data(ps.count.annotated)$Disease_on_colony_when_coring_binary <-
-  factor(sample_data(ps.count.annotated)$Disease_on_colony_when_coring_binary, 
-         levels = c("Unaffected", "Diseased"))
-
-head(sample_data(ps.count.annotated)$Disease_on_colony_when_coring_binary, 10) # levels look good
-```
-
-These levels look good, and we are good to move on to DESeq2 analysis on the OFAV florida keys samples between completely unaffected to persistantly diseased coral colonies. 
-```{r}
-dds = phyloseq_to_deseq2(ps.count.annotated, ~ Disease_on_colony_when_coring_binary)
-dds
-
-#Keep all rows and apply geometric mean to replace zeros
-cts <- DESeq2::counts(dds)
-geoMeans <- apply(cts, 1, function(row) if (all(row == 0)) 0 else exp(mean(log(row[row != 0]))))
-dds <- estimateSizeFactors(dds, geoMeans = geoMeans)
-
-# run the actual deseq function - check results at 0.05 p adjusted value
-dds <- DESeq(dds,test="Wald", fitType="parametric")
-res = results(dds, cooksCutoff = FALSE)
-alpha = 0.05
-sigtab = res[which(res$padj < alpha), ] # 5,894 DA genes
-
-# Add the functional annotations to the subset differentially abundant genes
-sigtab.fxn <- as(sigtab, "data.frame") %>% 
-  mutate(query = rownames(sigtab)) %>% 
-  left_join(fxn, by = "query")
-
-# Write these taxa out to a file to be saved for later
-write.table(sigtab.fxn,"../data/DESeq2_coassembly_results_disease_0.05.txt", sep="\t", 
-            col.names = TRUE, row.names = FALSE)
-
-# Write the 0.01 cutoff genes
-alpha01 = 0.01
-sigtab01 = res[which(res$padj < alpha01), ] # 2,449 DA genes
-
-# Add the functional annotations to the subset differentially abundant genes
-sigtab01.fxn <- as(sigtab01, "data.frame") %>% 
-  mutate(query = rownames(sigtab01)) %>% 
-  left_join(fxn, by = "query")
-
-# Write these taxa out to a file to be saved for later
-write.table(sigtab01.fxn,"../data/DESeq2_coassembly_results_disease_0.01.txt", sep="\t", 
-            col.names = TRUE, row.names = FALSE)
-
-sigtab.fxn
-sigtab01.fxn
-```
-
-## Corncob using the following code:
-```{r, eval=FALSE}
-set.seed(10) # set seed for reproducibility
-corncobDA.dis <- differentialTest(formula = ~ Disease_on_colony_when_coring_binary, 
-                                   phi.formula = ~ Disease_on_colony_when_coring_binary,
-                                   formula_null = ~ 1,
-                                   phi.formula_null = ~ Disease_on_colony_when_coring_binary,
-                                   test = "Wald", boot = FALSE,
-                                   data = ps.count.annotated,
-                                   fdr_cutoff = 0.05)
-
-# Save the corncob phyloseq object so you can manipulate it in R
-saveRDS(corncobDA.dis, "corncob_output_disease_at_sampling.rds")
-
-## Try controlling for the differences in the symbiont community
-set.seed(10) # set seed for reproducibility
-corncobDA.dis.symb <- differentialTest(formula = ~ Disease_on_colony_when_coring_binary + Zoox_background, 
-                                  phi.formula = ~ Disease_on_colony_when_coring_binary + Zoox_background,
-                                  formula_null = ~ Zoox_background,
-                                  phi.formula_null = ~ Disease_on_colony_when_coring_binary + Zoox_background,
-                                  test = "Wald", boot = FALSE,
-                                  data = ps.count.annotated,
-                                  fdr_cutoff = 0.05)
-
-# Save the corncob phyloseq object so you can manipulate it in R
-saveRDS(corncobDA.dis.symb, "corncob_output_disease_at_sampling_zoox.rds")
-```
-I would like to see how the number of differentially abudnant genes differs between these two runs, but I feel like I should do the second one, because it accounts for background zoox, which significantly explained variation in the microbiome, so I feel it is best to account for both things. 
-
-### disease at sampling only
-Then, I manipulated and saved the corncob output with this code:
-```{r}
-# read in RDS file
-corncobDA.dis <- readRDS("../data/corncob_output_disease_at_sampling.rds")
-
-plot(corncobDA.dis)
-
-# How many significant taxa are there?
-corncobDA.dis$significant_taxa %>% length
-```
-
-
-```{r}
-
-```
-
-### diseae at sampling while controlling for differential abundance due to background zooxanthellae
-```{r}
-# read in RDS file
-corncobDA.dis.symb <- readRDS("../data/corncob_output_disease_at_sampling_zoox.rds")
-
-plot(corncobDA.dis.symb)
-
-# How many significant taxa are there?
-corncobDA.dis.symb$significant_taxa %>% length
-```
-There are so many taxa that are differentially abundant. To get the ones that change most, it may be worthwhile to identify the taxa with the greatest change between unaffected and diseased taxa, or those with the greatest coefficient (positive or negative).
-```{r}
-# I want to extract the important information from this into a table...
-# check out results structure from one of the models
-corncobDA.dis.symb$significant_models[[1]]$coefficients
-
-# write a function to extract the corncob results
-extractmods2 <- function(model) {
-  result <- data.frame("Estimate" = model$coefficients[2, 1], 
-                        "Std.Error" = model$coefficients[2, 2], 
-                        "p" = model$coefficients[2, 4])
-  return(result)
-}
-
-# save the output as a list using the above function
-corncob.dis.symb.models <- lapply(corncobDA.dis.symb$significant_models, extractmods2)
-names(corncob.dis.symb.models) <- corncobDA.dis.symb$significant_taxa
-
-# save a table of annotations for just the significant genes
-sig.fxnl.genes.dis.symb <- filter(fxn, query %in% corncobDA.dis.symb$significant_taxa)
-
-# turn the output from a list to a dataframe for ease of saving and manipulating
-corncob.dis.symb.models.df <- plyr::ldply(corncob.dis.symb.models, data.frame) %>% 
-  left_join(sig.fxnl.genes.dis.symb, by = c(".id" = "query"))
-
-### Save these data so you don't have to re-run the model ###
-write.table(corncob.dis.symb.models.df, "../data/Corncob_coassembly_results_dis.symb_0.05.txt", sep="\t", row.names = FALSE, col.names = TRUE)
-```
-
-## Corncob disease and symbiont
-Read in the corncob data. I have a couple of questions. I want to see what the greatest 
-```{r}
-corn.dis.symb <- read.table("../data/Corncob_coassembly_results_dis.symb_0.05.txt", header = TRUE, sep = "\t")
-
-corn.dis.symb$Estimate %>% summary
-
-table(corn.dis.symb$Estimate > 0) 
-table(corn.dis.symb$Estimate < -1) 
-table(corn.dis.symb$Estimate < -3) 
-table(corn.dis.symb$Estimate > 3) 
-table(corn.dis.symb$Estimate < -3.5) 
-table(corn.dis.symb$Estimate > 5) 
-```
-## Figure for MS
-
-I imagine producing a table of all the differentially abundant genes, but for a general figure, I am interested in:
-- What functions are these differentially abundant genes performing?
-- What taxonomic groups are these differentially abundant genes part of?
-
-Genes enriched in diseased - what taxonomic groups are there?
-Genes enriched in unaffected - what taxonomic groups are there?
-
-We conducted differential abundance tests in apparently healthy tissue between unaffected and diseased coral colonies while controlling for the effect of background symbiodiniaceae on differential abundance, and identified 1,605 differentially abundant genes (supplementary table). This included 303 enriched in diseased tissue, and 1302 enriched in unaffected coral tissue. These genes were from varied taxonomic groups, including x, y, and z. 
-
-### Taxonomic info
-```{r}
-# What taxa ID is assigned to genes that were enriched in disease
-corn.dis.symb_tax <- corn.dis.symb %>%
-  left_join(taxa, by = c(".id" = "contig")) %>%
-  separate(complete_classification, 
-           into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
-           sep = "[;]", remove = FALSE)
-
-# How many of the total differentially abundant genes were actually annotated as bacteria?
-# disease-enriched - 168 of 303 
-dis.prok <- filter(corn.dis.symb_tax, Estimate > 0) %>% 
-  filter(Domain %in% c("d_Bacteria", "d_Archaea")) %>%
-  mutate(Phylum = case_when(
-    is.na(Phylum) ~ paste0(Domain),
-    TRUE ~ Phylum
-    )) %>%
-  mutate(Class = case_when(
-    is.na(Class) ~ paste0(Phylum),
-    TRUE ~ Class
-    )) %>%
-  mutate(Order = case_when(
-    is.na(Order) ~ paste0(Class),
-    TRUE ~ Order
-    )) %>%
-  mutate(Family = case_when(
-    is.na(Family) ~ paste0(Order),
-    TRUE ~ Family
-    )) %>%
-  mutate(Genus = case_when(
-    is.na(Genus) ~ paste0(Family),
-    TRUE ~ Genus
-    )) %>%
-  mutate(Species = case_when(
-    is.na(Species) ~ paste0(Genus),
-    TRUE ~ Species
-    ))
-
-
-# unaffected-enriched - 1,129 of 1,302
-unaff.prok <- filter(corn.dis.symb_tax, Estimate < 0) %>% 
-  filter(Domain %in% c("d_Bacteria", "d_Archaea")) %>%
-  mutate(Phylum = case_when(
-    is.na(Phylum) ~ paste0(Domain),
-    TRUE ~ Phylum
-    )) %>%
-  mutate(Class = case_when(
-    is.na(Class) ~ paste0(Phylum),
-    TRUE ~ Class
-    )) %>%
-  mutate(Order = case_when(
-    is.na(Order) ~ paste0(Class),
-    TRUE ~ Order
-    )) %>%
-  mutate(Family = case_when(
-    is.na(Family) ~ paste0(Order),
-    TRUE ~ Family
-    )) %>%
-  mutate(Genus = case_when(
-    is.na(Genus) ~ paste0(Family),
-    TRUE ~ Genus
-    )) %>%
-  mutate(Species = case_when(
-    is.na(Species) ~ paste0(Genus),
-    TRUE ~ Species
-    ))
-
-1129/1303 # 86.6%
-
-# Can I just make a stacked bar chart with two columns (one disease and one unaffected)?
-dis.unaff.prok <- rbind(dis.prok, unaff.prok) %>%
-  mutate(corncob_result = ifelse(Estimate > 0, "Disease_assoc", "Unaffected_assoc"))
-
-x1 <- distinctColorPalette(50)
-
-# Make a plot
-ggplot(dis.unaff.prok, aes(x = corncob_result, fill = Phylum)) +
-  geom_bar() +
-  scale_fill_manual(values = x1)
-
-ggplot(dis.unaff.prok, aes(x = corncob_result, fill = Phylum)) +
-  geom_bar(position = "fill") +
-  scale_fill_manual(values = x1)
-
-ggplot(dis.unaff.prok, aes(x = corncob_result, fill = Class)) +
-  geom_bar() +
-  scale_fill_manual(values = x1)
-
-ggplot(dis.unaff.prok, aes(x = corncob_result, fill = Class)) +
-  geom_bar(position = "fill") +
-  scale_fill_manual(values = x1)
-```
 
 # MS ANALYSIS - KEGG Diff. Abundance - Disease vs. Healthy
 
@@ -397,6 +48,8 @@ I also took the AA file of the predicted genes and ran that in the GhostKOALA da
 
 I am also re-running this on 1/4 because I re-made the symbiodiniaceae composition (Zoox_composition) column in the metadata since I found errors in the Background Zoox column. 
 
+I am re-running this to include a colony fate category. Additionally, the colony fate category was recently re-organized because we have updated colony information. Additionally, I changed the disease at sampling category to "Condition At Sampling".
+
 ## Data 
 ```{r}
 # Load table with count abundances from salmon ("numreads")
@@ -404,7 +57,7 @@ prokreads <- read.table("../data/prok_FLK_coassembly_salmon_quant_all_NumReads.t
 prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
 
 # Load metadata
-metadata <- as.data.frame(read_excel("../data/metadata_SP1_v9.4.xlsx", na = "NA"))
+metadata <- as.data.frame(read_excel("../data/RRC_sample_CoreSiteData_v10_RRCCoreData_SP1_Keys_OFAV.xlsx", na = "NA"))
 rownames(metadata) <- metadata$CoralID
 
 # how many genes are zero across all samples? Like 32k
@@ -520,11 +173,11 @@ For the symbiont composition, I will use the new column called `Zoox_composition
 3/2/25 - I UPDATED THIS with the new zoox composition groupings (`Zoox_composition_New`). This way the anlaysis reflects the actual symbiont groupings.  
 ```{r}
 ## Set levels
-sample_data(ps.prok.annotated)$Disease_on_colony_when_coring_binary <-
-  factor(sample_data(ps.prok.annotated)$Disease_on_colony_when_coring_binary, 
-         levels = c("Unaffected", "Diseased"))
+sample_data(ps.prok.annotated)$Condition_At_Sampling <-
+  factor(sample_data(ps.prok.annotated)$Condition_At_Sampling, 
+         levels = c("Apparently Healthy", "Actively Diseased"))
 
-head(sample_data(ps.prok.annotated)$Disease_on_colony_when_coring_binary, 10) # levels look good
+head(sample_data(ps.prok.annotated)$Condition_At_Sampling, 10) # levels look good
 
 sample_data(ps.prok.annotated)$Zoox_composition_New <- 
   factor(sample_data(ps.prok.annotated)$Zoox_composition_New, 
@@ -534,10 +187,10 @@ head(sample_data(ps.prok.annotated)$Zoox_composition_New, 10) # levels look good
 
 ## Test disease on colony when coring and control for symbiont composition
 set.seed(10) # set seed for reproducibility
-prok.da.dis <- differentialTest(formula = ~ Disease_on_colony_when_coring_binary + Zoox_composition_New, 
-                                  phi.formula = ~ Disease_on_colony_when_coring_binary + Zoox_composition_New,
+prok.da.dis <- differentialTest(formula = ~ Condition_At_Sampling + Zoox_composition_New, 
+                                  phi.formula = ~ Condition_At_Sampling + Zoox_composition_New,
                                   formula_null = ~ Zoox_composition_New,
-                                  phi.formula_null = ~ Disease_on_colony_when_coring_binary + Zoox_composition_New,
+                                  phi.formula_null = ~ Condition_At_Sampling + Zoox_composition_New,
                                   test = "Wald", boot = FALSE,
                                   data = ps.prok.annotated,
                                   fdr_cutoff = 0.05)
@@ -546,7 +199,7 @@ plot(prok.da.dis, level = "SYMBOL")
 prok.da.dis$significant_taxa
 ```
 
-WOW! This resulted in 328-ish differentially abundant taxa!!! That is kinda a LOT, but not as many as before, when it was 685 from the previous analysis that accounted for differences due to the old zoox composition groupings.  I would like to be thoughtful in how I represent that data. Maybe I will do the ones that are disease-enriched in one graph, and one that is healthy-enriched in the other graph? I could also plot them all as a heatmap and I DEFINTIELY want to graph them by their BRITE hierarchies. 
+WOW! This resulted in 327 differentially abundant taxa!!! That is kinda a LOT, but not as many as before, when it was 685 from the previous analysis that accounted for differences due to the old zoox composition groupings.  I would like to be thoughtful in how I represent that data. Maybe I will do the ones that are disease-enriched in one graph, and one that is healthy-enriched in the other graph? I could also plot them all as a heatmap and I DEFINTIELY want to graph them by their BRITE hierarchies. 
 
 Out of curiosity, I am also going to see how many taxa there are with a more stringent p-value cutoff. Save all the data first
 ```{r}
@@ -764,7 +417,7 @@ sig.ko.tax.data$.id %>% unique %>% length
 write.table(sig.ko.tax.data, "../data/Corncob_prok_annotated_results_03.02.25_ANNOTATIONS.txt", sep="\t", row.names = FALSE, col.names = TRUE)
 ```
 
-# Visualize the corncob results
+# Visualize condition at sampling corncob results
 
 It is difficult to know how to parse all these data because the KO identifiers have a lot of different results. Even within one metabolism-based annotation, one gene may play a role in multiple metabolic pathways, so it can have multiple annotations. So when I visualize the data, that is going to be reflected. 
 
@@ -1132,6 +785,510 @@ ggplot(sig.nonmetab.genes.KO.subsetforgraph.tax, aes(x = Estimate, y = Level4)) 
 
 # MS ANALYSIS - FATE
 
+## Corncob
+
+I would like to analyze the Colony fate category. This time, I will use that, and again control for zoox. This will be interesting to add to the analysis and is something the co-authors and likely reviewers will ask for. 
+```{r}
+## Set levels
+sample_data(ps.prok.annotated)$Fate_after_SP1 <-
+  factor(sample_data(ps.prok.annotated)$Fate_after_SP1, 
+         levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
+
+head(sample_data(ps.prok.annotated)$Fate_after_SP1, 10) # levels look good
+
+sample_data(ps.prok.annotated)$Zoox_composition_New <- 
+  factor(sample_data(ps.prok.annotated)$Zoox_composition_New, 
+         levels = c("B", "B_dom_plus_C", "B_dom_plus_CD", "B_dom_plus_D", "BD", "CD"))
+
+head(sample_data(ps.prok.annotated)$Zoox_composition_New, 10) # levels look good
+
+## Test disease on colony when coring and control for symbiont composition
+set.seed(10) # set seed for reproducibility
+prok.da.fate <- differentialTest(formula = ~ Fate_after_SP1 + Zoox_composition_New, 
+                                  phi.formula = ~ Fate_after_SP1 + Zoox_composition_New,
+                                  formula_null = ~ Zoox_composition_New,
+                                  phi.formula_null = ~ Fate_after_SP1 + Zoox_composition_New,
+                                  test = "Wald", boot = FALSE,
+                                  data = ps.prok.annotated,
+                                  fdr_cutoff = 0.05)
+
+plot(prok.da.fate, level = "SYMBOL")
+prok.da.fate$significant_taxa
+```
+Looks like there are 392 differentially abundant genes by different categories! I'll dig into these to see how best to represent these different groupings. 
+
+Save all the data. NEED TO MAKE A NEW FUNCTION TO GET THESE DATA OUT OF CORNCOB
+```{r}
+# write a function to extract the corncob results
+extractmods3 <- function(model) {
+  result <- data.frame("Estimate" = model$coefficients[2:4, 1], 
+                        "Std.Error" = model$coefficients[2:4, 2], 
+                        "p" = model$coefficients[2:4, 4], 
+                       "Comparison" = c("Unaffected_vs_Recovered",
+                                        "Unaffected_vs_WillbeDiseased",
+                                        "Unaffected_vs_Diseased"))
+  return(result)
+}
+
+# save the output as a list using the above function
+sig.models.fate <- lapply(prok.da.fate$significant_models, extractmods3)
+names(sig.models.fate) <- prok.da.fate$significant_taxa
+
+# save a table of annotations for just the significant genes
+sig.fxnl.genes.fate <- filter(unique_gene_ko_annotated, geneID %in% prok.da.fate$significant_taxa)
+
+# turn the output from a list to a dataframe for ease of saving and manipulating
+sig.models.df.fate <- plyr::ldply(sig.models.fate, data.frame) %>% 
+  mutate(significant = ifelse(p < 0.05, TRUE, FALSE)) %>%
+  left_join(sig.fxnl.genes.fate, by = c(".id" = "geneID")) %>%
+  left_join(prok_taxa, by = c(".id" = "contig"))
+
+### Save these data so you don't have to re-run the model ###
+write.table(sig.models.df.fate, "../data/Corncob_prok_annotated_results_FATE_07.28.25.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+```
+
+## Process output
+
+How many different genes are there significant at a adjusted p value < 0.001?
+```{r}
+filter(sig.models.df.fate, p < 0.001) #162 comparisons
+filter(sig.models.df.fate, Estimate > 0) #536 comparisons 
+filter(sig.models.df.fate, Estimate < 0) #640 comparisons
+
+sig.models.df.fate$KO %>% length #1176
+sig.models.df.fate$KO %>% unique %>% length #356
+
+sig.taxa.fate <- sig.models.df.fate$KO %>% unique
+
+write(sig.taxa.fate, file = "sig.taxa.KO.fate.txt")
+```
+
+I need to try to manipulate the data table output so that I can get a table that shows the KEGG Orthology information clearly.
+
+Try looping through a bunch of KO ids. I will loop through all the KO IDs and get them combined. 
+```{r}
+# List of KO identifiers
+ko_ids.fate <- readLines("sig.taxa.KO.fate.txt")
+
+ko_ids_testgroup <- c("K09125", "K00950", "K15738", "K07457", "K24163", "K00059")
+
+# Create an empty dataframe to store parsed data for all KO IDs
+parsed_data.fate <- data.frame(KO = character(), 
+                          BRITEhierarchy = character(),
+                          Level2 = character(),
+                          Level3 = character(),
+                          Level4 = character(),
+                          Level5 = character(),
+                          Level6 = character(),
+                          KO_DETAILS = character(),
+                          stringsAsFactors = FALSE)
+
+# Loop through each KO ID
+for (ko_id in ko_ids.fate) {
+  
+  # Retrieve information for the KO
+  ko_info <- keggGet(ko_id)
+  
+  # Note which KO ID you are on
+  print(paste("Processing KO ID: ", ko_id))
+  
+  # Check if the KO ID has BRITE hierarchy data
+  if (!is.null(ko_info[[1]]$BRITE)) {
+    brite <- ko_info[[1]]$BRITE  # Extract the BRITE section
+    
+    # Initialize variables for hierarchy levels
+    brite_hierarchy <- level2 <- level3 <- level4 <- level5 <- level6 <- NA
+    
+    # Process each line in the BRITE section
+    for (line in brite) {
+      
+      # Determine indentation level (number of leading spaces)
+      indentation <- attr(regexpr("^\\s*", line), "match.length")  # Count spaces
+      content <- trimws(line)  # Remove leading/trailing spaces
+      
+      if (indentation == 0) {
+          # Top-level category (Level1)
+          brite_hierarchy <- content
+          level2 <- level3 <- level4 <- level5 <- level6 <- NA  # Reset lower levels
+      } else if (indentation == 1) {
+          # Second-level category (Level2)
+          level2 <- content
+          level3 <- level4 <- level5 <- level6 <- NA  # Reset lower levels
+      } else if (indentation == 2) {
+          # Third-level category (Level3)
+          level3 <- content
+          level4 <- level5 <- level6 <- NA  # Reset lower level
+      } else if (indentation == 3) {
+          # KO entry or Fourth-level category (Level4)
+          if (grepl("^K[0-9]+", content)) {  # Check if it's a KO entry
+            ko_details <- content
+            parsed_data.fate <- rbind(parsed_data.fate, data.frame(KO = ko_id, 
+                                                         BRITEhierarchy = brite_hierarchy,
+                                                         Level2 = level2,
+                                                         Level3 = level3,
+                                                         Level4 = level4,
+                                                         Level5 = level5,
+                                                         Level6 = level6,
+                                                         KO_DETAILS = ko_details,
+                                                         stringsAsFactors = FALSE))
+          } else { 
+            level4 <- content
+            level5 <- level6 <- NA
+          }
+      } else if (indentation == 4) {
+          # KO entry or Fifth-level category (Level5)
+          if (grepl("^K[0-9]+", content)) {  # Check if it's a KO entry
+            ko_details <- content
+            parsed_data.fate <- rbind(parsed_data.fate, data.frame(KO = ko_id, 
+                                                         BRITEhierarchy = brite_hierarchy,
+                                                         Level2 = level2,
+                                                         Level3 = level3,
+                                                         Level4 = level4,
+                                                         Level5 = level5,
+                                                         Level6 = level6,
+                                                         KO_DETAILS = ko_details,
+                                                         stringsAsFactors = FALSE))
+          } else {
+            level5 <- content
+            level6 <- NA
+          }
+      } else if (indentation == 5) {
+          # KO entry or or Sixth-level category (Level6)
+          if (grepl("^K[0-9]+", content)) {  # Check if it's a KO entry
+            ko_details <- content
+            parsed_data.fate <- rbind(parsed_data.fate, data.frame(KO = ko_id, 
+                                                         BRITEhierarchy = brite_hierarchy,
+                                                         Level2 = level2,
+                                                         Level3 = level3,
+                                                         Level4 = level4,
+                                                         Level5 = level5,
+                                                         Level6 = level6,
+                                                         KO_DETAILS = ko_details,
+                                                         stringsAsFactors = FALSE))
+          } else {
+            level6 <- content
+          }
+      } else if (indentation == 6) {
+        # KO entry or or Seventh-level category (Level7)
+          if (grepl("^K[0-9]+", content)) {  # Check if it's a KO entry
+            ko_details <- content
+            parsed_data.fate <- rbind(parsed_data.fate, data.frame(KO = ko_id, 
+                                                         BRITEhierarchy = brite_hierarchy,
+                                                         Level2 = level2,
+                                                         Level3 = level3,
+                                                         Level4 = level4,
+                                                         Level5 = level5,
+                                                         Level6 = level6,
+                                                         KO_DETAILS = ko_details,
+                                                         stringsAsFactors = FALSE))
+          } else {
+            ko_details <- paste("WARNING, doesn't match KO ID", content)
+            parsed_data.fate <- rbind(parsed_data.fate, data.frame(KO = ko_id, 
+                                                         BRITEhierarchy = brite_hierarchy,
+                                                         Level2 = level2,
+                                                         Level3 = level3,
+                                                         Level4 = level4,
+                                                         Level5 = level5,
+                                                         Level6 = level6,
+                                                         KO_DETAILS = ko_details,
+                                                         stringsAsFactors = FALSE))
+          } 
+      } else {
+          # For unexpected cases, add a catch-all (optional)
+          warning(paste("Unexpected indentation level encountered: ", indentation, "for the following KO: ", ko_id))
+      }
+    }
+  } else {
+    warning(paste("No BRITE data found for KO ID:", ko_id))
+  }
+}
+
+# View the parsed hierarchy
+print(parsed_data.fate)
+```
+
+
+Now, the `parsed_data.fate` data frame is the BRITE hierarchy data for the significant taxa. Ultimately, I just want the KEGG orthology data for each of these KO IDs. 
+
+Then, I will make a data table of the estimates and a heatmap of the corncob results. I will subset only of the KEGG Orthology annotations. Then I will focus on specifically metabolism-based KEGG Orthology annotations since those have an ecological function more than things like "DNA repair" or similar. 
+```{r}
+KEGG_Orthology_sig_ko.fate <- parsed_data.fate %>%
+  filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
+  filter(Level2 == "09100 Metabolism")
+
+# Potential functional hierarchies to look into and graph
+parsed_data.fate %>%
+  filter(BRITEhierarchy != "KEGG Orthology (KO) [BR:ko00001]") %>%
+  dplyr::select(BRITEhierarchy) %>%
+  unique
+ 
+#did i capture all the KOs? NO - only 165 out of all of them
+KEGG_Orthology_sig_ko.fate$KO %>% unique %>% length
+
+parsed_data.fate$KO %>% unique %>% length
+
+# For each of the KO identifiers, match the gene ID and the associated abundance to that KO. There are multiple duplicate annotations for each KO, and duplicate genes that match a KO, so it is going to be a bit of an "all against all" match up. I also want to add the taxonomy results. 
+sig.ko.tax.data.fate <- sig.models.df.fate %>%
+  dplyr::select(.id:NAME, DBLINKS, annotation, complete_classification) %>%
+  full_join(parsed_data.fate, by = "KO", relationship = "many-to-many")
+
+# Check that there are still just 392 unique genes
+sig.ko.tax.data.fate$.id %>% unique %>% length
+
+### Save these data so you have the fully parsed out annotations for each gene (there will be more rows than columns) ###
+write.table(sig.ko.tax.data.fate, "../data/Corncob_prok_annotated_results_FATE_07.28.25_ANNOTATIONS.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+```
+
+## Visualize/explore fate
+
+It is difficult to know how to parse all these data because the KO identifiers have a lot of different results. Even within one metabolism-based annotation, one gene may play a role in multiple metabolic pathways, so it can have multiple annotations. So when I visualize the data, that is going to be reflected. 
+
+Additionally, since I did a corncob test with multiple levels, I am not sure I want to show the output of those that are NOT significant, since it might be misleading. So I'll have to think about how to display that. 
+
+### Metabolism
+I want to show the metabolism-based results. I will plot the coefficient since that reflects how much something increased or decreased in the different conditions. 
+
+Outlying questions
+- Is it ok if there are duplicate genes on an x or y axis? Maybe just note the # of genes?
+- Is it ok to just show the coefficient?
+- Should I include a heatmap? 
+- How many genes have a metabolism function? 
+- What is the function of the genes that are not involved in metabolism?
+
+```{r metabolism graph}
+# How many genes have a Metabolism function? 180
+sig.ko.tax.data.fate %>% 
+  filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
+  filter(Level2 == "09100 Metabolism") %>%
+  dplyr::select(.id) %>%
+  unique %>% 
+  nrow
+
+# How many KO ids have a Metabolism function? 165
+sig.ko.tax.data.fate %>% 
+  filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
+  filter(Level2 == "09100 Metabolism") %>%
+  dplyr::select(KO) %>%
+  unique %>% 
+  nrow
+
+# Subset genes with metabolism annotations - need to facet with the different categories...
+sig.metab.genes.fate <- sig.ko.tax.data.fate %>% 
+  filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
+  filter(Level2 == "09100 Metabolism") %>%
+  mutate(Comparison = factor(Comparison, levels = c("Unaffected_vs_Recovered", "Unaffected_vs_WillbeDiseased", "Unaffected_vs_Diseased")))
+
+# Make a graph of metabolism genes
+# need to facet by the groupings
+ggplot(sig.metab.genes.fate, aes(x = Level4, y = Estimate)) +
+  geom_point() +
+  coord_flip() +
+  facet_grid(Level3 ~ Comparison, space = "free", scales = "free_y")
+
+# change the color based on whether the relationship is significant - 
+ggplot(sig.metab.genes.fate, aes(x = Level4, y = Estimate, color = significant)) +
+  geom_point() +
+  coord_flip() +
+  facet_grid(Level3 ~ Comparison, space = "free", scales = "free_y")
+
+# ultimately, I think showing the results of the non-signficant relationships will just be more confusing 
+# only significant comparisons. 
+ggplot(filter(sig.metab.genes.fate, significant == TRUE), aes(x = Level4, y = Estimate, color = significant)) +
+  geom_point() +
+  coord_flip() +
+  facet_grid(Level3 ~ Comparison, space = "free", scales = "free_y")
+
+# I like showing only the significant relationships. I will pretty this up. 
+ggplot(filter(sig.metab.genes.fate, significant == TRUE), aes(x = Level4, y = Estimate)) +
+  geom_errorbar(aes(ymin = Estimate-Std.Error, ymax = Estimate+Std.Error), width = 0.2, color = "gray") +
+  geom_point(alpha = 0.7) +
+  coord_flip() +
+  facet_grid(Level3 ~ Comparison, space = "free", scales = "free_y") +
+  labs(y = "Differential Abundance Coefficient", x = "KEGG Orthology Metabolism Group")
+
+# How many genes in the different categories?
+summary_table <- sig.metab.genes.fate %>%
+  filter(significant == TRUE) %>% 
+  mutate(posneg = ifelse(Estimate > 0, "positive", "negative")) %>%
+  dplyr::select(.id, Comparison, posneg, Level3) %>% #slect columns of interest
+  distinct(.id, Comparison, posneg, Level3) %>% 
+  group_by(Level3, posneg, Comparison) %>%
+  summarize(UniqueGenes = n_distinct(.id), .groups = "drop") %>% 
+  spread(posneg, UniqueGenes)
+
+print(summary_table)
+```
+I want to make a graph of the genes involved in natural product relevant metabolism. This will be a subset of the above graph that is hopefully easier to digest because there won't be as many categories and genes as the above graph. 
+```{r}
+sig.metab.genes.fate.subsetforgraph <- sig.metab.genes.fate %>%
+  filter(significant == TRUE) %>%
+  filter(Level3 %in% c("09109 Metabolism of terpenoids and polyketides", 
+                       "09110 Biosynthesis of other secondary metabolites", 
+                       "09111 Xenobiotics biodegradation and metabolism"))
+
+ggplot(sig.metab.genes.fate.subsetforgraph, aes(x = Estimate, y = Level4)) +
+  geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
+  geom_point(alpha = 0.7) +
+  facet_grid(Level3 ~ Comparison, space = "free", scales = "free_y") +
+  labs(y = "Differential Abundance Coefficient", x = "KEGG Orthology Metabolism Group") +  
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+# How many genes and KOs are reflected in this figure? 16
+sig.metab.genes.fate.subsetforgraph %>% 
+  dplyr::select(.id) %>%
+  unique %>%
+  nrow
+
+# GRAPH THAT COULD BE ADDED TO A PAPER
+ggplot(sig.metab.genes.fate.subsetforgraph, aes(x = Estimate, y = Level4)) +
+  geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
+  geom_point(alpha = 0.7) +
+  facet_grid(Level3 ~ Comparison, space = "free", scales = "free_y") +
+  labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology Metabolism Group") +  
+  geom_vline(xintercept = 0, linetype = "dashed")
+
+# What about cofactors and vitamins? Let's add this to the previous info...
+sig.metab.genes.fate.subsetforgraph.vits <- sig.metab.genes.fate %>%
+  filter(significant == TRUE) %>%
+  filter(Level3 %in% c("09109 Metabolism of terpenoids and polyketides", 
+                       "09110 Biosynthesis of other secondary metabolites", 
+                       "09111 Xenobiotics biodegradation and metabolism",
+                       "09108 Metabolism of cofactors and vitamins"))
+
+ggplot(sig.metab.genes.fate.subsetforgraph.vits, aes(x = Estimate, y = Level4)) +
+  geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
+  geom_point(alpha = 0.7) +
+  facet_grid(Level3 ~ Comparison, space = "free", scales = "free_y") +
+  labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology Metabolism Group") +  
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  geom_vline(xintercept = 0, linetype = "dashed")
+```
+I like this graph A LOT! Indeed, I am thinking this analysis is better suited to the paper more and more and more. 
+Some trends I am noticing thaat would be good to include in the paper:
+- Recovered corals are enriched for a LOT of vitamin metabolism pathways and some secondary metabolite pathways --> does this further HELP the coral maybe?
+- The diseased corals have significant declines in vitamin metabolism and secondary metabolites, especially antibiotics --> loss of potentially protective functional capacity of the coral microbiome
+
+#### Add taxonomy
+```{r}
+## SPLIT APART THE TAXONOMY INFO - CAN I COLOR BY TAXA?
+sig.metab.genes.fate.subsetforgraph.vits.tax <- sig.metab.genes.fate.subsetforgraph.vits %>%
+    separate(complete_classification, 
+           into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
+           sep = "[;]", remove = FALSE)
+
+ggplot(sig.metab.genes.fate.subsetforgraph.vits.tax, aes(x = Estimate, y = Level4)) +
+  geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
+  geom_point(alpha = 0.7, aes(color = Family)) +
+  facet_grid(Level3 ~ Comparison, space = "free", scales = "free_y") +
+  labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology Metabolism Group") +  
+  geom_vline(xintercept = 0, linetype = "dashed")
+```
+I do like the addition of the taxonomic information. I think this is useful and will be good to include down the road! 
+
+### Everything else?
+
+It looks like 180 out of the 392 genes were involved in metabolism functions. What about the other half? I am going to go through and assess and graph the other genes. First, I need to subset the data to only look at the remaining genes. 
+
+```{r}
+# Get a list of all the genes from the first graph
+metab.genes.fate.id <- sig.metab.genes.fate$.id %>% unique
+
+# Subset the data to exclude the metab.genes.id values
+sig.nonmetab.genes.fate <- sig.ko.tax.data.fate[!sig.ko.tax.data.fate$.id %in% metab.genes.fate.id, ]
+
+# Double check how many unique genes in the new data frame (212 - good! adds up to 392 with 180)
+sig.nonmetab.genes.fate$.id %>% unique %>% length
+
+# Subset the KO data since it includes all 179 genes
+sig.nonmetab.genes.fate.KO <- sig.nonmetab.genes.fate %>% 
+  filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
+  filter(significant == TRUE) %>%
+  mutate(Comparison = factor(Comparison, levels = c("Unaffected_vs_Recovered", "Unaffected_vs_WillbeDiseased", "Unaffected_vs_Diseased")))
+
+# How many level 2 groups are there?
+sig.nonmetab.genes.fate.KO$Level2 %>% factor %>% levels
+sig.nonmetab.genes.fate.KO$Level3 %>% factor %>% levels
+
+# Try out a couple ways to graph the data
+# Make a graph of not metabolism genes
+
+# all genes - only significant comparisons represented
+ggplot(sig.nonmetab.genes.fate.KO, aes(x = Level4, y = Estimate)) +
+  geom_errorbar(aes(ymin = Estimate-Std.Error, ymax = Estimate+Std.Error), width = 0.2, color = "gray") +
+  geom_point(alpha = 0.7) +
+  coord_flip() +
+  facet_grid(Level2 + Level3 ~ Comparison, space = "free", scales = "free_y") +
+  labs(y = "Differential Abundance Coefficient", x = "KEGG Orthology Group") +
+  geom_hline(yintercept = 0, linetype = "dashed")
+
+# How many genes in the different categories?
+summary_table_nonmetab <- sig.nonmetab.genes.fate.KO %>%
+  mutate(posneg = ifelse(Estimate > 0, "positive", "negative")) %>%
+  dplyr::select(.id, Comparison, posneg, Level3) %>% #slect columns of interest
+  distinct(.id, Comparison, posneg, Level3) %>% 
+  group_by(Level3, posneg, Comparison) %>%
+  summarize(UniqueGenes = n_distinct(.id), .groups = "drop") %>% # count unique genes
+  spread(posneg, UniqueGenes)
+
+print(summary_table_nonmetab)
+```
+Okay, there's a lot of interesting stuff here. Overall, I don't need some of these groups in the resultant graph. For example, all the human disease stuff is pretty useless, except beta-Lactam resistance. I don't need any unclassified groupings. I don't need "metabolism" or "genetic information processing" either. 
+
+I also don't really want to focus on unclassified proteins.
+
+Instead, I'd like to focus on groupings that would likely lead to potential disease or health of the coral, not stuff (transcription) required for normal cell growth. 
+
+Many of the differentially abundant genes that I would hypothesize are playing a role in microbial-based disease susceptibility or resilience are in the Environmental Information Processing, Cellular processes, Drug resistance, and protein families, signalling and cellular processes groups. I will make a graph with just those categories. I will ignore the human disease ones because I anticipate those are relevant to human pathogens, which I don't think would be abundant on the reefs. 
+
+```{r}
+sig.nonmetab.genes.fate.KO.subsetforgraph <- sig.nonmetab.genes.fate.KO %>%
+  filter(Level3 %in% c("09131 Membrane transport",
+                       "09132 Signal transduction", 
+                       "09142 Cell motility",
+                       "09143 Cell growth and death", 
+                       "09145 Cellular community - prokaryotes",
+                       "09175 Drug resistance: antimicrobial",
+                       "09183 Protein families: signaling and cellular processes"))
+
+# How many genes and KOs are reflected in this figure? 73
+sig.nonmetab.genes.fate.KO.subsetforgraph %>% 
+  dplyr::select(.id) %>%
+  unique %>%
+  nrow
+
+sig.nonmetab.genes.fate.KO.subsetforgraph %>%  #64
+  dplyr::select(KO) %>%
+  unique %>%
+  nrow
+
+## POTENTIAL MANUSCRIPT FIGURE - Maybe keep the transporters for now
+ggplot(sig.nonmetab.genes.fate.KO.subsetforgraph, aes(x = Estimate, y = Level4)) +
+  geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
+  geom_point(alpha = 0.7) +
+  facet_grid(Level2 + Level3 ~ Comparison, space = "free", scales = "free_y") +
+  labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology") +  
+  geom_vline(xintercept = 0, linetype = "dashed")
+```
+Thius is super interesting again. Like with the stuff previously, I think these fate categories are putting together a much much better story. A couple of thinks I'm noticiing:
+- The recovered grouping has these signalling things ENRICHED relative to unaffected corals. This tells me these are things that may be helping the coral be resilient to SCTLD over a long time frame. 
+- In contrast, many gene groups that are helping corals be resilient are DEPLETED in diseased corals relative to the unaffected corals. For example, disease corals have depleted secretion systems and quorum sensing. Interestingly, the Will be diseased grouping is particularly telling here. 
+
+### Add taxonomy?
+```{r}
+## SPLIT APART THE TAXONOMY INFO - CAN I COLOR BY TAXA?
+sig.nonmetab.genes.fate.KO.subsetforgraph.tax <- sig.nonmetab.genes.fate.KO.subsetforgraph %>%
+    separate(complete_classification, 
+           into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
+           sep = "[;]", remove = FALSE)
+
+ggplot(sig.nonmetab.genes.fate.KO.subsetforgraph.tax, aes(x = Estimate, y = Level4)) +
+  geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
+  geom_point(alpha = 0.7, aes(color = Family)) +
+  facet_grid(Level2 + Level3 ~ Comparison, space = "free", scales = "free_y") +
+  labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology") +  
+  geom_vline(xintercept = 0, linetype = "dashed")
+```
+
 
 # MS FIGURES
 
@@ -1201,6 +1358,8 @@ c <- ggplot(sig.metab.genes.subsetforgraph.tax, aes(x = Estimate, y = Level4)) +
   scale_color_manual(values = c("#117733", "#CC6677", "#AA4499", "#332288"))
 c
 
+
+
 # Non-metabolism genes subset
 d <- ggplot(sig.nonmetab.genes.KO.subsetforgraph.tax, aes(x = Estimate, y = Level4)) +
   geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
@@ -1212,8 +1371,36 @@ d <- ggplot(sig.nonmetab.genes.KO.subsetforgraph.tax, aes(x = Estimate, y = Leve
   scale_color_manual(values = c("#CC6677","#AA4499", "#332288", "#88CCEE" ))
 d
 
+
 wrap_plots(c,d, nrow = 2, heights = c(1,1.3), axis_titles = "collect")
 ggsave("../figures/DA_MainFig_genes_03.02.25.pdf", width = 8, height = 7)
+```
+## Main FATE Figure
+```{r}
+# Metabolism genes subset
+c <- ggplot(sig.metab.genes.fate.subsetforgraph.vits.tax, aes(x = Estimate, y = Level4)) +
+  geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
+  geom_point(alpha = 0.7, size = 3, aes(color = Family)) +
+  facet_grid(Level3 ~ Comparison, space = "free", scales = "free_y") +
+  labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology") +  
+  geom_vline(xintercept = 0, linetype = "dashed") +
+#  xlim(-5, 2) +
+  scale_color_manual(values = c("#B2DF8A", "#33A02C", "#E31A1C", "#FDBF6F", "#FF7F00", "#CAB2D6", "#6A3D9A", "#FFFF99","#B15928"))
+c
+
+# Non-metabolism genes subset
+d <- ggplot(sig.nonmetab.genes.fate.KO.subsetforgraph.tax, aes(x = Estimate, y = Level4)) +
+  geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
+  geom_point(alpha = 0.7, size = 3, aes(color = Family)) +
+  facet_grid(Level2 + Level3 ~ Comparison, space = "free", scales = "free_y") +
+  labs(x = "Differential Abundance Coefficient", y = "KEGG Orthology") +  
+  geom_vline(xintercept = 0, linetype = "dashed") +
+ # xlim(-5, 2) +
+  scale_color_manual(values = c("#A6CEE3", "#1F78B4", "#B2DF8A", "#33A02C", "#FB9A99", "#E31A1C", "#FDBF6F", "#FF7F00", "#CAB2D6", "#6A3D9A", "#FFFF99","#B15928"))
+d
+
+wrap_plots(c,d, nrow = 2, heights = c(1.3,1), axis_titles = "collect")
+ggsave("../figures/DA_MainFig_genes_FATE_07.28.25.pdf", width = 10, height = 9)
 ```
 
 
