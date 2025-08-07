@@ -60,7 +60,7 @@ prokreads <- read.table("../data/prok_FLK_coassembly_salmon_quant_all_NumReads.t
 prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
 
 # Load metadata
-metadata <- as.data.frame(read_excel("../data/RRC_sample_CoreSiteData_v10_RRCCoreData_SP1.xlsx", na = "NA"))
+metadata <- as.data.frame(read_excel("../data/RRC_sample_CoreSiteData_v10_RRCCoreData_SP1_Keys_OFAV.xlsx", na = "NA"))
 rownames(metadata) <- metadata$CoralID
 
 # how many genes are zero across all samples? Like 32k
@@ -85,17 +85,6 @@ idx <- match(colnames(prokreads_nozero), rownames(metadata))
 metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced samples
 ```
 
-# Data analysis 
-
-I am interested in how many different types of hits there were. Start by capturing some summary statistics of the different groupings. 
-
-```{r}
-ggplot(amr, aes(x = Cut_Off, fill = Resistance_Mechanism)) +
-  geom_bar(position = "fill")
-
-ggplot(amr, aes(x = Cut_Off, fill = Resistance_Mechanism)) +
-  geom_bar()
-```
 Generate some summary statistics regarding the different AMR categories of all 200,000 hits
 ```{r}
 amr %>% 
@@ -117,122 +106,8 @@ amr %>%
 
 amr$ORF_ID %>% unique %>% length
 ```
-Let's look at the 49 "strict" hits. What are some different stats for them?
-```{r}
-strict_amr <- amr %>% 
-  filter(Cut_Off == "Strict")
 
-strict_amr %>% 
-  dplyr::count(Drug_Class)
 
-strict_amr %>% 
-  dplyr::count(AMR_Gene_Family)
-```
-
-# Heatmap
-
-Let's make a heatmap of the different genes that are "Strict" AMR gene hits. 
-
-## prep data
-```{r}
-# add a column of contig ids to the prok reads table
-prokreads_nozero$Genes <- rownames(prokreads_nozero)
-
-# First, I need to get a matrix of the abundances of genes that have "strict" hits
-strict_amr_counts <- strict_amr %>%
-  left_join(prokreads_nozero, by = c("ORF_ID" = "Genes")) 
-
-strict_amr_counts_matrix <- as.matrix(strict_amr_counts[, 17:57])
-
-# Add the rownames (Gene IDs)
-rownames(strict_amr_counts_matrix) <- strict_amr_counts$ORF_ID
-
-# Scale using z-score standardization for each gene (row) across samples (columsn)
-z_scores_amr <- t(apply(strict_amr_counts_matrix, 1, scale))  # Scale rows (genes)
-colnames(z_scores_amr) <- colnames(strict_amr_counts_matrix)
-```
-
-## Make the heatmap
-```{r}
-# Define the color scale
-col_fun <- colorRamp2(c(-1, 0, 6), c("blue", "white", "red"))  # Z-score scale: low -> blue, high -> red
-
-# Generate the heatmap
-Heatmap(
-  z_scores_amr,
-  name = "Z-Score",
-  col = col_fun,
-  cluster_rows = TRUE,  # Cluster genes
-  cluster_columns = TRUE,  # Cluster samples
-  show_row_dend = TRUE,  # Show row dendrogram
-  show_column_dend = TRUE,  # Show column dendrogram
-  row_title = "AMR Genes",
-  column_title = "Coral Samples",
-  row_names_gp = gpar(fontsize = 8),  # Adjust font size
-  column_names_gp = gpar(fontsize = 8),
-  heatmap_legend_param = list(title = "Gene Abundance")
-)
-```
-
-This is a great start! I want to add colors to the samples so I know which ones are diseased or healthy based on the "Disease at sampling category". 
-```{r}
-coral_sample_annotation <- HeatmapAnnotation(
-  Group = metadata_prok$Disease_on_colony_when_coring_binary,
-  col = list(Group = c("Unaffected" = "#0C7BDC", "Diseased" = "#FFC20A"))
-)
-
-gene_labels <- strict_amr_counts$AMR_Gene_Family
-
-# Include the annotation in the heatmap
-Heatmap(
-  z_scores_amr,
-  name = "Z-Score",
-  col = col_fun,
-  cluster_rows = TRUE,
-  cluster_columns = TRUE,
-  show_row_dend = TRUE,
-  show_column_dend = TRUE,
-  row_title = "AMR Genes",
-  column_title = "Coral Samples",
-  top_annotation = coral_sample_annotation,  # Add sample group annotation
-  row_labels = gene_labels,
-  row_names_gp = gpar(fontsize = 8),
-  column_names_gp = gpar(fontsize = 8),
-  heatmap_legend_param = list(title = "Gene Abundance")
-)
-
-# Move the legend
-draw(
-Heatmap(
-  z_scores_amr,
-  name = "Z-Score",
-  col = col_fun,
-  cluster_rows = TRUE,
-  cluster_columns = TRUE,
-  show_row_dend = TRUE,
-  show_column_dend = TRUE,
-  row_title = "AMR Genes",
-  column_title = "Coral Samples",
-  top_annotation = coral_sample_annotation,  # Add sample group annotation
-  row_labels = gene_labels,
-  row_names_gp = gpar(fontsize = 8),
-  column_names_gp = gpar(fontsize = 8),
-  heatmap_legend_param = list(title = "Gene Abundance")
-),
-  heatmap_legend_side = "right",          # Heatmap legend on the left
-  annotation_legend_side = "right"       # Annotation legend on the left
-)
-```
-
-Random metadata graph that I need
-```{r}
-ggplot(metadata_prok, aes(x = "", y = "", fill = Zoox_composition_New)) +
-  geom_bar(stat = "identity", width = 1) +
-  coord_polar("y", start = 0) +
-  theme_void() +
-  scale_fill_brewer(palette = "Dark2") +
-  labs(fill = "Symbiont Composition")
-```
 
 # AMR analysis
 
@@ -287,49 +162,48 @@ ps.amr.euc_diss <- vegdist(ps.amr.clr_otu, method = "euclidean")
 
 ### Disease
 ```{r}
-sample_data(ps.amr_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.amr_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-sample_data(ps.amr_clr)$Zoox_background <- factor(sample_data(ps.amr_clr)$Zoox_background, levels = c("none", "C", "CD", "D"))
+sample_data(ps.amr_clr)$Condition_At_Sampling <- factor(sample_data(ps.amr_clr)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
 
 # plot PCA
 disease_pca <- plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Disease_on_colony_when_coring_binary", 
-                shape ="Disease_on_colony_when_coring_binary") +
+                color="Condition_At_Sampling", 
+                shape ="Condition_At_Sampling") +
   geom_point(size = 4) +
   coord_fixed() +
-  labs(color = "Disease at sampling", shape = "Disease at sampling") +
+  labs(color = "Condition at sampling", shape = "Condition at sampling") +
   scale_color_manual(values = c("#0C7BDC", "#FFC20A"))
 disease_pca
 
 # Make the shape the background symbiont 
 plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Disease_on_colony_when_coring_binary", 
+                color="Condition_At_Sampling", 
                 shape ="Zoox_composition_New") +
   geom_point(size = 4) +
   coord_fixed() +
-  labs(color = "Disease at sampling", shape = "Symbiont Composition") +
+  labs(color = "Condition at sampling", shape = "Symbiont Composition") +
   scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
   scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
 
 # colony disease at sampling PERMANOVA
 set.seed(10)
-adonis2(formula = ps.amr.euc_diss ~ Disease_on_colony_when_coring_binary, data = ps.amr.clr_meta, permutations = 999) 
+adonis2(formula = ps.amr.euc_diss ~ Condition_At_Sampling, data = ps.amr.clr_meta, permutations = 999) 
 ```
 ### Symbiont composition
 ```{r}
 
 # plot PCA with labels to see which corals are farther apart
 plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Zoox_composition_New", shape = "Disease_on_colony_when_coring_binary") +
+                color="Zoox_composition_New", shape = "Condition_At_Sampling") +
   geom_point(size = 4) +
   coord_fixed() +
   ggrepel::geom_text_repel(label = sample_data(ps.amr_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
-  labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
+  labs(color = "Symbiodiniaceae composition", shape = "Condition at sampling")
 
 # without the labels - want transparency
 symbiont_pca <- plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Zoox_composition_New", shape = "Disease_on_colony_when_coring_binary") +
+                color="Zoox_composition_New", shape = "Condition_At_Sampling") +
   coord_fixed() +
-  labs(color = "Background Symbiodiniaceae", shape = "Disease at sampling")
+  labs(color = "Symbiodiniaceae composition", shape = "Condition at sampling")
 
 symbiont_pca$layers
 
@@ -353,8 +227,7 @@ pca_fate <- plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples",
                 color="Fate_after_SP1") +
   geom_point(size = 4) +
   coord_fixed() +
-  facet_wrap(. ~ Fate_after_SP1) +
-  scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
+  scale_color_manual(values = c("#482173", "#2e6f8e",  "#29af7f", "#FFC20A")) +
   labs(color = "Colony Fate")
 pca_fate
 
@@ -363,8 +236,7 @@ plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples",
                 color="Fate_after_SP1") +
   geom_point(size = 4) +
   coord_fixed() +
-  facet_wrap(. ~ Fate_after_SP1) +
-  scale_color_manual(values = c("#785EF0", "#648FFF", "#FFB000", "#DC267F")) +
+  scale_color_manual(values = c("#482173", "#2e6f8e",  "#29af7f", "#FFC20A")) +
   labs(color = "Colony Fate") +
   ggrepel::geom_text_repel(label = sample_data(ps.amr_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6)
 
@@ -375,67 +247,8 @@ adonis2(formula = ps.amr.euc_diss ~ Fate_after_SP1, data = ps.amr.clr_meta, perm
 
 ## Stacked bar plot
 
-The majority of AMR genes have an unclassified annotation
 
-```{r}
-amr.taxonomy <- tax_table(ps.amr) %>%
-  as.data.frame()
-
-# How many fully unclassified taxa?
-amr.taxonomy %>%
-  dplyr::count(annotation) %>%
-  arrange(desc(n)) %>%
-  head()
-
-# For visualizing, just graph the AMR genes that show up more than 100 counts in the total dataset
-ps.amr.filt <- ps.amr %>%
-  filter_taxa(function(x) sum(x) > 100, TRUE)
-
-ps_ra<-transform_sample_counts(ps.amr.filt, function(OTU) OTU/sum(OTU))
-ps_ra_nofilt<-transform_sample_counts(ps.amr, function(OTU) OTU/sum(OTU))
-
-# How many different phyla comprise the most abundant amr genes?
-tax_table(ps.amr.filt)[,"Phylum"] %>% unique
-tax_table(ps.amr.filt)[,"Class"] %>% unique
-
-# How many different phyla comprise the amr genes?
-tax_table(ps.amr)[,"Phylum"] %>% unique
-tax_table(ps.amr)[,"Class"] %>% unique
-
-plot_bar(ps.amr.filt, x = "CoralID", fill="Class")+
-  geom_bar(aes(fill=Class), stat="identity", position = "stack") +
-  theme(legend.position = "none") +
-  theme(strip.text=element_text(face="bold")) +
-  facet_grid(. ~ Disease_on_colony_when_coring_binary, scales = "free", space = "free") 
-
-plot_bar(ps.amr.filt, x = "CoralID", fill="Phylum")+
-  geom_bar(aes(fill=Phylum), stat="identity", position = "stack") +
-  theme(legend.position = "none") +
-  theme(strip.text=element_text(face="bold")) +
-  facet_grid(. ~ Disease_on_colony_when_coring_binary, scales = "free", space = "free") 
-
-plot_bar(ps_ra, x = "CoralID", fill="Class")+
-  geom_bar(aes(fill=Class), stat="identity", position = "stack") +
-  theme(legend.position = "none") +
-  theme(strip.text=element_text(face="bold")) +
-  facet_grid(. ~ Disease_on_colony_when_coring_binary, scales = "free", space = "free") 
-
-plot_bar(ps_ra, x = "CoralID", fill="Phylum")+
-  geom_bar(aes(fill=Phylum), stat="identity", position = "stack") +
-  theme(legend.position = "none") +
-  theme(strip.text=element_text(face="bold")) +
-  facet_grid(. ~ Disease_on_colony_when_coring_binary, scales = "free", space = "free") 
-
-p <- plot_bar(ps.amr.filt, x = "CoralID", fill="Class")+
-  geom_bar(aes(fill=Class), stat="identity", position = "stack") +
-  theme(strip.text=element_text(face="bold")) +
-  facet_grid(. ~ Disease_on_colony_when_coring_binary, scales = "free", space = "free") 
-
-legend <- cowplot::get_legend(p) #show the legend because it isn't printed in the gridded plot
-grid.newpage()
-grid.draw(legend)
-```
-Looks like a whopping 129,772 AMR genes don't have a taxonomic ID. I will remove those to get a better look at what taxa are making up the classified AMR genes. 
+A whopping 129,772 AMR genes don't have a taxonomic ID. I will remove those to get a better look at what taxa are making up the classified AMR genes. 
 
 ### Resistance mechanism
 It'd be nice to make a stacked bar plot of the general mechanisms. This will plot the top 8, which are making up the majority of the different groupings
@@ -444,15 +257,16 @@ ps.amr.taxfix <- ps.amr %>%
   transmute_tax_table(Resistance_Mechanism, AMR_Gene_Family, Best_Hit_ARO, ORF_ID) %>%
   tax_fix()
 
-sample_data(ps.amr.taxfix)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.amr.taxfix)$Disease_on_colony_when_coring_binary,
-                                                                          levels = c("Unaffected", "Diseased"))
+sample_data(ps.amr.taxfix)$Condition_At_Sampling <- factor(sample_data(ps.amr.taxfix)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
 
 rest.mech <- ps.amr.taxfix %>%
   comp_barplot(tax_level = "Resistance_Mechanism", 
                other_name = "Other resistance mechanism", # set custom name for the "other" category
-               facet_by = "Disease_on_colony_when_coring_binary") +
+               facet_by = "Condition_At_Sampling") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   labs(x = "Coral Colony ID", fill = "Resistance Mechanism")
+
+rest.mech
 
 tax_table(ps.amr.taxfix)[,1] %>% unique
 ```
@@ -484,19 +298,20 @@ ps.genefam <- ps.amr.new %>%
 
 ps.genefam
 
-sample_data(ps.genefam)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.genefam)$Disease_on_colony_when_coring_binary,
-                                                                          levels = c("Unaffected", "Diseased"))
+sample_data(ps.genefam)$Condition_At_Sampling <- factor(sample_data(ps.genefam)$Condition_At_Sampling,
+                                                        levels = c("Apparently Healthy", "Actively Diseased"))
 
 
 # Visualize the amr gene families, using the ID, since it is shorter. I can match up the actual name later
 genefam <- ps.genefam %>%
   comp_barplot(tax_level = "AMR_Gene_Family_ID", 
                other_name = "Other Gene Family", # set custom name for the "other" category
-               facet_by = "Disease_on_colony_when_coring_binary", 
+               facet_by = "Condition_At_Sampling", 
                n_taxa = 15,
                merge_other = TRUE) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   labs(x = "Coral Colony ID", fill = "AMR Gene Family")
+genefam
 
 amrfamilymatches <- filter(as.data.frame(amr.ps.new), AMR_Gene_Family_ID %in% c("amrgenefam_5", 
                                                             "amrgenefam_1",
@@ -550,7 +365,7 @@ bl.tax <- betalactamases %>%
            sep = "[;]", remove = TRUE) %>%
   as.data.frame()
 
-write.table(bl.tax, "../data/beta-lactamase_AMR.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+#write.table(bl.tax, "../data/beta-lactamase_AMR.txt", sep="\t", row.names = FALSE, col.names = TRUE)
 
 bl.tax %>% head
 rownames(bl.tax) <- bl.tax[,1]
@@ -572,14 +387,6 @@ phylaonly <- bl.tax %>%
 plotting_phyla <- phylaonly %>% 
   mutate(rank = rank(-n), 
          Phylum = ifelse(rank <= 10, Phylum, 'Other Phyla'))
-
-# Make a pie chart of the taxonomy - PHYLA
-
-ggplot(plotting_phyla, aes(x = "", y = n, fill = Phylum)) +
-  geom_bar(stat = "identity", width = 1) +
-  coord_polar("y", start = 0) +
-  theme_void() +
-  labs(fill = "Phylum")
 
 # Class level pie chart
 plotting_class <- classonly %>%
@@ -635,14 +442,14 @@ bl.psobj.agg <- bl.psobj %>%
 
 bl.psobj.agg
 
-sample_data(bl.psobj.agg)$Disease_on_colony_when_coring_binary <- factor(sample_data(bl.psobj.agg)$Disease_on_colony_when_coring_binary,
-                                                                          levels = c("Unaffected", "Diseased"))
+sample_data(bl.psobj.agg)$Condition_At_Sampling <- factor(sample_data(bl.psobj.agg)$Condition_At_Sampling,
+                                                        levels = c("Apparently Healthy", "Actively Diseased"))
 
 # Visualize the amr gene families, using the ID, since it is shorter. I can match up the actual name later
 blactams <- bl.psobj.agg %>%
   comp_barplot(tax_level = "AMR_Gene_Family", 
                other_name = "Other beta-Lactamase gene family", # set custom name for the "other" category
-               facet_by = "Disease_on_colony_when_coring_binary", 
+               facet_by = "Condition_At_Sampling", 
                n_taxa = 15,
                merge_other = TRUE) +
   labs(x = "Coral Colony ID", y = "Relative Abundance", fill = "AMR Gene Family") +
@@ -679,190 +486,159 @@ ps.amr.bl.clr_otu <- otu_table(ps.amr.bl_clr) %>% as.matrix %>% t() #samples mus
 ps.amr.bl.euc_diss <- vegdist(ps.amr.bl.clr_otu, method = "euclidean")
 ```
 
-Make the plot
+Make a plot
 ```{r}
-sample_data(ps.amr.bl_clr)$Disease_on_colony_when_coring_binary <- factor(sample_data(ps.amr.bl_clr)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
+sample_data(ps.amr.bl_clr)$Condition_At_Sampling <- factor(sample_data(ps.amr.bl_clr)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
 
-# plot PCA
-disease_pca <- plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
-                color="Disease_on_colony_when_coring_binary", 
-                shape ="Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  labs(color = "Disease at sampling", shape = "Disease at sampling") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A"))
-disease_pca
+sample_data(ps.amr.bl_clr)$Fate_after_SP1 <- 
+              factor(sample_data(ps.amr.bl_clr)$Fate_after_SP1, 
+                                 levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
+
 
 # Make the shape the background symbiont 
-amr_pca <- plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
-                color="Disease_on_colony_when_coring_binary", 
+plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
+                color="Fate_after_SP1", 
                 shape ="Zoox_composition_New") +
   geom_point(size = 4) +
   coord_fixed() +
-  labs(color = "Disease at sampling", shape = "Symbiodiniaceae Composition") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
- scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
+  labs(color = "Colony Fate", shape = "Symbiodiniaceae Composition") +
+  scale_color_manual(values = c("#482173", "#2e6f8e",  "#29af7f", "#FFC20A")) +
+  scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
 
-amr_pca
 
-# colony disease at sampling PERMANOVA
+# colony condition at sampling PERMANOVA
 set.seed(10)
-adonis2(formula = ps.amr.bl.euc_diss ~ Disease_on_colony_when_coring_binary, data = ps.amr.bl.clr_meta, permutations = 999) 
+adonis2(formula = ps.amr.bl.euc_diss ~ Condition_At_Sampling, data = ps.amr.bl.clr_meta, permutations = 999) 
 
 # colony zoox PERMANOVA
 set.seed(10)
 adonis2(formula = ps.amr.bl.euc_diss ~ Zoox_composition_New, data = ps.amr.bl.clr_meta, permutations = 999) 
+
+# colony fate PERMANOVA
+set.seed(10)
+adonis2(formula = ps.amr.bl.euc_diss ~ Fate_after_SP1, data = ps.amr.bl.clr_meta, permutations = 999) 
 ```
 
 # Amoxicillin treatments
+
+I am interested in how the number of treatments in different colonies varies and is potentially influencing the number of beta-lactamase genes, which would confer resistance on colonies. 
+Some important variables:
+- Recent_Treatment_Less_than_two_months (was the treatment recent? In some cases, corals never had treatments.)
+- Estimated_Num_treatments_Per_sq_m (scaled to size, which makes the treatments a bit more comparable across colonies)
+- Number_treatments_PreSampling (treatments leading up to the sampling in May/June 2021)
+- Colony fate = what did the colony end up doing (potentially related to treatments)
 ```{r}
-metadata_prok$Disease_on_colony_when_coring_binary <- factor(metadata_prok$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
+metadata_prok$Fate_after_SP1 <- factor(metadata_prok$Fate_after_SP1, levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
 
-treatments <- ggplot(metadata_prok, aes(x = Disease_on_colony_when_coring_binary,
-                          y = Total_treatments_before_coring)) +
-  geom_boxplot(lwd = 0.5, outlier.shape = NA) +
-  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1) + 
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Disease_on_colony_when_coring_binary, 
-                  shape = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  ylab("Total amoxicillin treatments") +
-  theme(legend.text.align = 0) +
-  labs(color = "Disease at sampling", x = "Disease at sampling", shape = "Disease at sampling") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A"))
+sample_data(ps.amr.bl_clr)$Recent_Treatment_Less_than_two_months <- factor(sample_data(ps.amr.bl_clr)$Recent_Treatment_Less_than_two_months, levels = c("No", "Yes", "NoTreatments"))
 
-treatments
 
 plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
-                color="Total_treatments_before_coring", 
-                shape ="Disease_on_colony_when_coring_binary") +
+                color="Estimated_Num_treatments_Per_sq_m", 
+                shape ="Fate_after_SP1") +
   geom_point(size = 4) +
   coord_fixed() +
-  labs(color = "Total amoxicillin treatments", shape = "Disease at sampling")
+  labs(color = "Amoxicilling treatments per sq m.", shape = "Colony Fate")
 
-# PERMANOVA for total treatments before coring
+plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
+                color="Number_treatments_PreSampling", 
+                shape ="Fate_after_SP1") +
+  geom_point(size = 4) +
+  coord_fixed() +
+  labs(color = "Amoxicillin treatments pre-sampling", shape = "Colony Fate")
+
+amr_pca <- plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
+                color="Recent_Treatment_Less_than_two_months", 
+                shape ="Fate_after_SP1") +
+  geom_point(size = 4) +
+  coord_fixed() +
+  labs(color = "Recent treatment (<2 mo.)", shape = "Colony Fate")+
+  scale_shape_manual(values = c(16, 15, 17, 18)) +
+  scale_color_manual(values = c("darkgreen", "orange", "gray"))
+
+amr_pca 
+
+# PERMANOVA for amoxicillin treatments
 set.seed(10)
-adonis2(formula = ps.amr.bl.euc_diss ~ Total_treatments_before_coring, data = ps.amr.bl.clr_meta, permutations = 999) 
+adonis2(formula = ps.amr.bl.euc_diss ~ Estimated_Num_treatments_Per_sq_m, data = ps.amr.bl.clr_meta, permutations = 999) 
 
-# Test between the two groupings for amox treatments
-shapiro.test(metadata_prok$Total_treatments_before_coring) # not normal
+set.seed(10)
+adonis2(formula = ps.amr.bl.euc_diss ~ Number_treatments_PreSampling, data = ps.amr.bl.clr_meta, permutations = 999) 
 
-wilcox.test(Total_treatments_before_coring ~ Disease_on_colony_when_coring_binary, data = metadata_prok, exact = FALSE) # significant difference
+set.seed(10)
+adonis2(formula = ps.amr.bl.euc_diss ~ Recent_Treatment_Less_than_two_months, data = ps.amr.bl.clr_meta, permutations = 999) 
 ```
-Total treatments is not significant with the actual permanova. 
+What if I only subset corals that had any history of treatment? Remove all corals that were not treated at ALL over the course of the study?
+
+```{r}
+# Subset to only corals with any treatment history
+ps.amr.bl.treated <- subset_samples(ps.amr.bl, Recent_Treatment_Less_than_two_months != "NoTreatments")
+
+# transform the data using centered log-ratio transformations
+ps.amr.bl.treated_clr <- microbiome::transform(ps.amr.bl.treated, 'clr')
+
+# Generate aitchison distance ordination (euclidean distance on clr-transformed data)
+ps.amr.bl.treated_clr_euc <- ordinate(ps.amr.bl.treated_clr, "RDA", "euclidean")
+
+# Generate aitchison distance dissimilarity matrix with vegan for adonis2 test
+ps.amr.bl.treated.clr_meta <- as(sample_data(ps.amr.bl.treated_clr), "data.frame")
+ps.amr.bl.treated.clr_otu <- otu_table(ps.amr.bl.treated_clr) %>% as.matrix %>% t() #samples must be rows, so transpose
+
+#get dissimilarity matrix 
+ps.amr.bl.treated.euc_diss <- vegdist(ps.amr.bl.treated.clr_otu, method = "euclidean")
+
+sample_data(ps.amr.bl_clr)$Recent_Treatment_Less_than_two_months <- factor(sample_data(ps.amr.bl_clr)$Recent_Treatment_Less_than_two_months, levels = c("No", "Yes"))
+
+# PCAs on only corals that had some history of antibiotic treatment
+plot_ordination(ps.amr.bl.treated_clr, ps.amr.bl.treated_clr_euc, type="samples", 
+                color="Estimated_Num_treatments_Per_sq_m", 
+                shape ="Fate_after_SP1") +
+  geom_point(size = 4) +
+  coord_fixed() +
+  labs(color = "Amoxicilling treatments per sq m.", shape = "Colony Fate")
+
+plot_ordination(ps.amr.bl.treated_clr, ps.amr.bl.treated_clr_euc, type="samples", 
+                color="Number_treatments_PreSampling", 
+                shape ="Fate_after_SP1") +
+  geom_point(size = 4) +
+  coord_fixed() +
+  labs(color = "Amoxicillin treatments pre-sampling", shape = "Colony Fate")
+
+plot_ordination(ps.amr.bl.treated_clr, ps.amr.bl.treated_clr_euc, type="samples", 
+                color="Recent_Treatment_Less_than_two_months", 
+                shape ="Fate_after_SP1") +
+  geom_point(size = 4) +
+  coord_fixed() +
+  labs(color = "Recent treatment (<2 mo.)", shape = "Colony Fate")
+
+
+# PERMANOVA for amoxicillin treatments
+set.seed(10)
+adonis2(formula = ps.amr.bl.treated.euc_diss ~ Estimated_Num_treatments_Per_sq_m, data = ps.amr.bl.treated.clr_meta, permutations = 999) 
+
+set.seed(10)
+adonis2(formula = ps.amr.bl.treated.euc_diss ~ Number_treatments_PreSampling, data = ps.amr.bl.treated.clr_meta, permutations = 999) 
+
+set.seed(10)
+adonis2(formula = ps.amr.bl.treated.euc_diss ~ Recent_Treatment_Less_than_two_months, data = ps.amr.bl.treated.clr_meta, permutations = 999) 
+```
+Honestly, the results are worse when I relate the whole composition to only corals with some history of antibiotic treatment. 
 
 # Diversity of beta-lactamases
 
 I would expect that as the number of treatments increases, that the diversity of beta-lactamase genes increases in the coral microbiome in response to the antibiotic pressure. I need to adjust the table so that I can calculate the number of different beta-lactamases in each coral sample. 
-```{r}
-# Use the agglomerated phyloseq object of just beta lactamases from above
-bl.psobj.agg %>% otu_table
-
-# Change levels
-sample_data(bl.psobj.agg)$Disease_on_colony_when_coring_binary <- factor(sample_data(bl.psobj.agg)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# Look at the diversity of beta-lactamases (richness)
-plot_richness(bl.psobj.agg)
-
-plot_richness(bl.psobj.agg, measures = "Observed", x = "Total_treatments_before_coring", color = "Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  ylab("Richness of Beta-lactamase genes") +
-  xlab("Total amoxicillin treatments before coring") +
-  labs(color = "Disease at sampling")
-
-plot_richness(bl.psobj.agg, measures = "Shannon", x = "Total_treatments_before_coring", color = "Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  ylab("Shannon diversity of Beta-lactamase genes") +
-  xlab("Total amoxicillin treatments before coring") +
-  labs(color = "Disease at sampling")
-
-plot_richness(bl.psobj.agg, measures = "Observed", x = "Disease_on_colony_when_coring_binary", color = "Disease_on_colony_when_coring_binary") +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  ylab("Richness of Beta-lactamase genes") +
-  xlab("Total amoxicillin treatments before coring") +
-  labs(color = "Disease at sampling")
-
-plot_richness(bl.psobj.agg, measures = "Shannon", x = "Disease_on_colony_when_coring_binary", color = "Disease_on_colony_when_coring_binary") +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  ylab("Shannon diversity of Beta-lactamase genes") +
-  xlab("Total amoxicillin treatments before coring") +
-  labs(color = "Disease at sampling")
-
-colnames(sample_data(bl.psobj.agg))
-```
 
 Graph richness but NOT using the agglomerated table. This way you treat each individual beta-lactamase gene as a different gene. This could be different individual genes, even if they are annotated as the same beta-lactamase genes. 
-```{r}
-# Use the agglomerated phyloseq object of just beta lactamases from above
-bl.psobj %>% otu_table
-
-# Change levels
-sample_data(bl.psobj)$Disease_on_colony_when_coring_binary <- factor(sample_data(bl.psobj)$Disease_on_colony_when_coring_binary, levels = c("Unaffected", "Diseased"))
-
-# Look at the diversity of beta-lactamases (richness)
-plot_richness(bl.psobj)
-
-plot_richness(bl.psobj, measures = "Observed", x = "Total_treatments_before_coring", color = "Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  ylab("Richness of Beta-lactamase genes") +
-  xlab("Total amoxicillin treatments before coring") +
-  labs(color = "Disease at sampling")
-
-plot_richness(bl.psobj, measures = "Shannon", x = "Total_treatments_before_coring", color = "Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  ylab("Shannon diversity of Beta-lactamase genes") +
-  xlab("Total amoxicillin treatments before coring") +
-  labs(color = "Disease at sampling")
-
-plot_richness(bl.psobj, measures = "Observed", x = "Disease_on_colony_when_coring_binary", color = "Disease_on_colony_when_coring_binary") +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  ylab("Richness of Beta-lactamase genes") +
-  xlab("Total amoxicillin treatments before coring") +
-  labs(color = "Disease at sampling")
-
-plot_richness(bl.psobj, measures = "Shannon", x = "Disease_on_colony_when_coring_binary", color = "Disease_on_colony_when_coring_binary") +
-  geom_boxplot(outlier.shape = NA) +
-  geom_jitter(position=position_jitter(width=.1, height=0), 
-              aes(color = Disease_on_colony_when_coring_binary), 
-              size = 4, alpha = 0.8) +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  ylab("Shannon diversity of Beta-lactamase genes") +
-  xlab("Total amoxicillin treatments before coring") +
-  labs(color = "Disease at sampling")
-
-## MS FIGURE
-plot_richness(bl.psobj, measures = "Observed", x = "Total_treatments_before_coring", color = "Disease_on_colony_when_coring_binary") +
-  geom_point(size = 4) +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  ylab("Richness of Beta-lactamase genes") +
-  xlab("Total amoxicillin treatments before coring") +
-  labs(color = "Disease at sampling")
-```
-
 
 Use breakaway to test the richness estimation and covariates
 ```{r}
-richness_bl <- bl.psobj.agg %>% breakaway
-plot(richness_bl, physeq=bl.psobj.agg, color="Disease_on_colony_when_coring_binary")
+# Change levels
+sample_data(bl.psobj)$Condition_At_Sampling <- factor(sample_data(bl.psobj.agg)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
+
+sample_data(bl.psobj)$Fate_after_SP1 <- factor(sample_data(bl.psobj.agg)$Fate_after_SP1, levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
 
 richness_bl.og <- bl.psobj %>% breakaway
-plot(richness_bl.og, physeq=bl.psobj, color="Disease_on_colony_when_coring_binary")
+plot(richness_bl.og, physeq=bl.psobj, color="Condition_At_Sampling")
 
 # statistical inference
 meta.bl <- bl.psobj %>%
@@ -873,51 +649,63 @@ meta.bl <- bl.psobj %>%
 combined_richness.bl <- meta.bl %>%
   left_join(summary(richness_bl.og),
             by = "sample_names") %>%
-  mutate(Disease_on_colony_when_coring_binary = 
-           factor(Disease_on_colony_when_coring_binary,
-                  levels=c("Unaffected", "Diseased")))
+  mutate(Condition_At_Sampling = 
+           factor(Condition_At_Sampling,
+                  levels=c("Apparently Healthy", "Actively Diseased"))) %>%
+  mutate(Recent_Treatment_Less_than_two_months = 
+           factor(Recent_Treatment_Less_than_two_months,
+                  levels=c("No", "Yes", "NoTreatments"))) %>%
+  mutate(Fate_after_SP1 = 
+           factor(Fate_after_SP1,
+                  levels=c("Recovered", "Unaffected", "Will be diseased", "Diseased")))
 
 # Test for an impact of disease on richness
-bt_disease_fixed <- betta(formula = estimate ~ Disease_on_colony_when_coring_binary, 
+bt_disease_fixed <- betta(formula = estimate ~ Fate_after_SP1, 
                       ses = error, data = combined_richness.bl)
 bt_disease_fixed$table
 
-# Test for an impact of treatments on richness
-bt_treatments_fixed <- betta(formula = estimate ~ Total_treatments_before_coring, 
+# Test for an impact of treatments on richness - scaled by size
+bt_treatments_fixed <- betta(formula = estimate ~ Estimated_Num_treatments_Per_sq_m, 
                       ses = error, data = combined_richness.bl)
 bt_treatments_fixed$table
 
-# Plot estimated richness (adding conf. intervals is horrible for graphing...so I will keep them in the table)
-ggplot(combined_richness.bl, aes(x = Total_treatments_before_coring, y = estimate)) +
-  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2, color = "gray") +
-  geom_point(size = 4, aes(color = Disease_on_colony_when_coring_binary)) +
-  geom_smooth(method = "lm", se = FALSE)
+# Test for an impact of treatments on richness
+bt_treatments_fixed <- betta(formula = estimate ~ Number_treatments_PreSampling, 
+                      ses = error, data = combined_richness.bl)
+bt_treatments_fixed$table
 
+# Test for an impact of treatment history (recent = <2 months, versus a while ago)
+bt_treatments_fixed <- betta(formula = estimate ~ Recent_Treatment_Less_than_two_months, 
+                      ses = error, data = combined_richness.bl)
+bt_treatments_fixed$table
+
+# Plot estimated richness 
 richness <- ggplot(combined_richness.bl, aes(x = Total_treatments_before_coring, y = estimate)) +
-  geom_point(size = 4, aes(color = Disease_on_colony_when_coring_binary,
-                           shape = Disease_on_colony_when_coring_binary)) +
+  geom_point(size = 4, aes(color = Recent_Treatment_Less_than_two_months,
+                           shape = Fate_after_SP1)) +
   geom_smooth(method = "lm", se = FALSE, color = "black") +
-  labs(x = "Total amoxicillin treatments before coring", y = "Estimated richness of beta-lactamase genes", color = "Disease at Sampling", shape = "Disease at Sampling") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) 
+  labs(x = "Total amoxicillin treatments before sampling", y = "Estimated richness of beta-lactamase genes", color = "Recent treatment (<2 mo.)", shape = "Colony Fate") +
+  scale_shape_manual(values = c(16, 15, 17, 18)) +
+  scale_color_manual(values = c("darkgreen", "orange", "gray"))
 richness
 ```
 
 # MAIN MS FIG
 I would like to put all the beta-lactamase genes together
 ```{r}
-ggarrange(ggarrange(ggarrange(treatments, richness, ncol = 2, common.legend = TRUE, labels = c("a.", "b."), legend = "bottom"), 
-          betalactam.tax, widths = c(1.5, 1), labels = c("", "c.")), 
-          blactams, nrow = 2, labels = c("", "d."))
+#ggarrange(ggarrange(ggarrange(treatments, richness, ncol = 2, common.legend = TRUE, labels = c("a.", "b."), legend = "bottom"), 
+#          betalactam.tax, widths = c(1.5, 1), labels = c("", "c.")), 
+#          blactams, nrow = 2, labels = c("", "d."))
 
-wrap_plots(wrap_plots(treatments, richness),
-           wrap_plots(betalactam.tax, amr_pca), nrow = 2, heights = c(1,1.3), axis_titles = "collect")
+wrap_plots(wrap_plots(richness, amr_pca, guides = "collect", widths = c(1,1.5)),
+           wrap_plots(betalactam.tax), nrow = 2, heights = c(1,1.3), axis_titles = "collect")
 
-#ggsave("../figures/AMR_beta-lactamase_wPCA.pdf", width = 13, height = 9)
+ggsave("../figures/AMR_beta-lactamase_wPCA_08.07.25.pdf", width = 12, height = 8)
 ```
 
 ### SUPP FIGURE - Graphs together
 ```{r}
 wrap_plots(rest.mech, genefam,blactams, nrow = 3, axis_titles = "collect_x")
 
-#ggsave("../figures/AMR_all_betalactams_stacked_bar.pdf", width = 12, height = 15)
+#ggsave("../figures/AMR_all_betalactams_stacked_bar_08.07.25.pdf", width = 12, height = 15)
 ```
