@@ -1413,6 +1413,15 @@ write.table(sig.metab.genes.subsetforgraph.tax, "../data/DA_MainFig_Gene_Informa
 write.table(sig.nonmetab.genes.KO.subsetforgraph.tax, "../data/DA_MainFig_Gene_Information_b_03.02.25.txt", sep="\t", row.names = FALSE, col.names = TRUE)
 ```
 
+## Fate Supplement - gene names of just the subset fate genes for MS
+```{r}
+sig.metab.genes.fate.subsetforgraph.vits.tax
+sig.nonmetab.genes.fate.KO.subsetforgraph.tax
+
+write.table(sig.metab.genes.fate.subsetforgraph.vits.tax, "../data/DA_MainFig_Gene_Information_FATE_a_07.29.25.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+write.table(sig.nonmetab.genes.fate.KO.subsetforgraph.tax, "../data/DA_MainFig_Gene_Information_FATE_b_07.29.25.txt", sep="\t", row.names = FALSE, col.names = TRUE)
+```
+
 # ZOOX ANALYSIS - RRC Report
 
 In addition to focusing on the diseased/unaffected colonies, one of the main deliverables of the RRC report was investigating microbial genes associated with the symbionts. Since I have the new symbiont composition categories, i can do a corncob analysis to look for differentially abundant genes. 
