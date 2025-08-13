@@ -1289,6 +1289,14 @@ ggplot(sig.nonmetab.genes.fate.KO.subsetforgraph.tax, aes(x = Estimate, y = Leve
   geom_vline(xintercept = 0, linetype = "dashed")
 ```
 
+### Will be diseased deep dive
+
+Honestly, the "Will be diseased" category is super interesting. I'd be curious to see the abundance of these differentially abundant genes across the disease history versus not disease history spectrum or in realtion to how soon after the sampling they get disease. but it is a bit confusing. I also think this may not be the most useful comparison since the dispersion wasn't significant and there are only 3 in that category that have a history of disease. 
+```{r}
+
+```
+
+
 
 # MS FIGURES
 
@@ -1313,10 +1321,10 @@ b <- ggplot(sig.nonmetab.genes.KO, aes(x = Estimate, y = Level4)) +
   geom_vline(xintercept = 0, linetype = "dashed")
 
 a
-ggsave("../figures/DA_metabolism_genes_03.02.25.pdf", width = 6, height = 11)
+#ggsave("../figures/DA_metabolism_genes_03.02.25.pdf", width = 6, height = 11)
 
 b
-ggsave("../figures/DA_non-metabolism_genes_03.02.25.pdf", width = 6, height = 11)
+#ggsave("../figures/DA_non-metabolism_genes_03.02.25.pdf", width = 6, height = 11)
 ```
 
 ## Summary tables
@@ -1373,7 +1381,7 @@ d
 
 
 wrap_plots(c,d, nrow = 2, heights = c(1,1.3), axis_titles = "collect")
-ggsave("../figures/DA_MainFig_genes_03.02.25.pdf", width = 8, height = 7)
+#ggsave("../figures/DA_MainFig_genes_03.02.25.pdf", width = 8, height = 7)
 ```
 ## Main FATE Figure
 ```{r}
@@ -1400,7 +1408,7 @@ d <- ggplot(sig.nonmetab.genes.fate.KO.subsetforgraph.tax, aes(x = Estimate, y =
 d
 
 wrap_plots(c,d, nrow = 2, heights = c(1.3,1), axis_titles = "collect")
-ggsave("../figures/DA_MainFig_genes_FATE_07.28.25.pdf", width = 10, height = 9)
+#ggsave("../figures/DA_MainFig_genes_FATE_07.28.25.pdf", width = 10, height = 9)
 ```
 
 

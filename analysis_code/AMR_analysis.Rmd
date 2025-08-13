@@ -111,7 +111,13 @@ amr$ORF_ID %>% unique %>% length
 
 # AMR analysis
 
-## PCA of AMR genes.
+
+## Stacked bar plot
+
+
+A whopping 129,772 AMR genes don't have a taxonomic ID. I will remove those to get a better look at what taxa are making up the classified AMR genes. 
+
+### Resistance mechanism
 
 Phyloseq object of AMR genes. 
 
@@ -143,114 +149,6 @@ ps.amr <- phyloseq(NUMREADS, META, AMR)
 ps.amr
 ```
 
-Looks like there are 178,736 anti-microbial resistance genes that are non-zero abundance in the dataset. There were a total of 200,100 different genes. So lots to work with. I will make a PCA of only AMR genes. I will make it like I do for other PCAs. 
-
-```{r}
-# transform the data using centered log-ratio transformations
-ps.amr_clr <- microbiome::transform(ps.amr, 'clr')
-
-# Generate aitchison distance ordination (euclidean distance on clr-transformed data)
-ps.amr_clr_euc <- ordinate(ps.amr_clr, "RDA", "euclidean")
-
-# Generate aitchison distance dissimilarity matrix with vegan for adonis2 test
-ps.amr.clr_meta <- as(sample_data(ps.amr_clr), "data.frame")
-ps.amr.clr_otu <- otu_table(ps.amr_clr) %>% as.matrix %>% t() #samples must be rows, so transpose
-
-#get dissimilarity matrix 
-ps.amr.euc_diss <- vegdist(ps.amr.clr_otu, method = "euclidean")
-```
-
-### Disease
-```{r}
-sample_data(ps.amr_clr)$Condition_At_Sampling <- factor(sample_data(ps.amr_clr)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
-
-# plot PCA
-disease_pca <- plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Condition_At_Sampling", 
-                shape ="Condition_At_Sampling") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  labs(color = "Condition at sampling", shape = "Condition at sampling") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A"))
-disease_pca
-
-# Make the shape the background symbiont 
-plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Condition_At_Sampling", 
-                shape ="Zoox_composition_New") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  labs(color = "Condition at sampling", shape = "Symbiont Composition") +
-  scale_color_manual(values = c("#0C7BDC", "#FFC20A")) +
-  scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
-
-# colony disease at sampling PERMANOVA
-set.seed(10)
-adonis2(formula = ps.amr.euc_diss ~ Condition_At_Sampling, data = ps.amr.clr_meta, permutations = 999) 
-```
-### Symbiont composition
-```{r}
-
-# plot PCA with labels to see which corals are farther apart
-plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Zoox_composition_New", shape = "Condition_At_Sampling") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  ggrepel::geom_text_repel(label = sample_data(ps.amr_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6) +
-  labs(color = "Symbiodiniaceae composition", shape = "Condition at sampling")
-
-# without the labels - want transparency
-symbiont_pca <- plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Zoox_composition_New", shape = "Condition_At_Sampling") +
-  coord_fixed() +
-  labs(color = "Symbiodiniaceae composition", shape = "Condition at sampling")
-
-symbiont_pca$layers
-
-symbiont_pca$layers <- symbiont_pca$layers[-1]
-
-symbiont_pca_final <- symbiont_pca + geom_point(size=4, alpha=0.8)
-symbiont_pca_final
-
-# colony symbiont composition PERMANOVA
-set.seed(10)
-adonis2(formula = ps.amr.euc_diss ~ Zoox_composition_New, data = ps.amr.clr_meta, permutations = 999) 
-```
-### Colony Fate
-```{r}
-sample_data(ps.amr_clr)$Fate_after_SP1 <- 
-              factor(sample_data(ps.amr_clr)$Fate_after_SP1, 
-                                 levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
-
-# plot PCA - facet by fate
-pca_fate <- plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Fate_after_SP1") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  scale_color_manual(values = c("#482173", "#2e6f8e",  "#29af7f", "#FFC20A")) +
-  labs(color = "Colony Fate")
-pca_fate
-
-# plot PCA - facet by fate
-plot_ordination(ps.amr_clr, ps.amr_clr_euc, type="samples", 
-                color="Fate_after_SP1") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  scale_color_manual(values = c("#482173", "#2e6f8e",  "#29af7f", "#FFC20A")) +
-  labs(color = "Colony Fate") +
-  ggrepel::geom_text_repel(label = sample_data(ps.amr_clr)$CoralID, nudge_x = 2, nudge_y = 5, color = "black", alpha = 0.6)
-
-# colony disease fate
-set.seed(10)
-adonis2(formula = ps.amr.euc_diss ~ Fate_after_SP1, data = ps.amr.clr_meta, permutations = 999) 
-```
-
-## Stacked bar plot
-
-
-A whopping 129,772 AMR genes don't have a taxonomic ID. I will remove those to get a better look at what taxa are making up the classified AMR genes. 
-
-### Resistance mechanism
 It'd be nice to make a stacked bar plot of the general mechanisms. This will plot the top 8, which are making up the majority of the different groupings
 ```{r}
 ps.amr.taxfix <- ps.amr %>%
@@ -486,38 +384,6 @@ ps.amr.bl.clr_otu <- otu_table(ps.amr.bl_clr) %>% as.matrix %>% t() #samples mus
 ps.amr.bl.euc_diss <- vegdist(ps.amr.bl.clr_otu, method = "euclidean")
 ```
 
-Make a plot
-```{r}
-sample_data(ps.amr.bl_clr)$Condition_At_Sampling <- factor(sample_data(ps.amr.bl_clr)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
-
-sample_data(ps.amr.bl_clr)$Fate_after_SP1 <- 
-              factor(sample_data(ps.amr.bl_clr)$Fate_after_SP1, 
-                                 levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
-
-
-# Make the shape the background symbiont 
-plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
-                color="Fate_after_SP1", 
-                shape ="Zoox_composition_New") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  labs(color = "Colony Fate", shape = "Symbiodiniaceae Composition") +
-  scale_color_manual(values = c("#482173", "#2e6f8e",  "#29af7f", "#FFC20A")) +
-  scale_shape_manual(values = c(16, 15, 17, 18, 3, 8))
-
-
-# colony condition at sampling PERMANOVA
-set.seed(10)
-adonis2(formula = ps.amr.bl.euc_diss ~ Condition_At_Sampling, data = ps.amr.bl.clr_meta, permutations = 999) 
-
-# colony zoox PERMANOVA
-set.seed(10)
-adonis2(formula = ps.amr.bl.euc_diss ~ Zoox_composition_New, data = ps.amr.bl.clr_meta, permutations = 999) 
-
-# colony fate PERMANOVA
-set.seed(10)
-adonis2(formula = ps.amr.bl.euc_diss ~ Fate_after_SP1, data = ps.amr.bl.clr_meta, permutations = 999) 
-```
 
 # Amoxicillin treatments
 
@@ -528,9 +394,11 @@ Some important variables:
 - Number_treatments_PreSampling (treatments leading up to the sampling in May/June 2021)
 - Colony fate = what did the colony end up doing (potentially related to treatments)
 ```{r}
-metadata_prok$Fate_after_SP1 <- factor(metadata_prok$Fate_after_SP1, levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
+metadata_prok$Fate_after_SP1 <- factor(metadata_prok$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
 
 sample_data(ps.amr.bl_clr)$Recent_Treatment_Less_than_two_months <- factor(sample_data(ps.amr.bl_clr)$Recent_Treatment_Less_than_two_months, levels = c("No", "Yes", "NoTreatments"))
+
+sample_data(ps.amr.bl_clr)$Fate_after_SP1 <- factor(sample_data(ps.amr.bl_clr)$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
 
 
 plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
@@ -587,7 +455,7 @@ ps.amr.bl.treated.clr_otu <- otu_table(ps.amr.bl.treated_clr) %>% as.matrix %>% 
 #get dissimilarity matrix 
 ps.amr.bl.treated.euc_diss <- vegdist(ps.amr.bl.treated.clr_otu, method = "euclidean")
 
-sample_data(ps.amr.bl_clr)$Recent_Treatment_Less_than_two_months <- factor(sample_data(ps.amr.bl_clr)$Recent_Treatment_Less_than_two_months, levels = c("No", "Yes"))
+sample_data(ps.amr.bl.treated_clr)$Recent_Treatment_Less_than_two_months <- factor(sample_data(ps.amr.bl.treated_clr)$Recent_Treatment_Less_than_two_months, levels = c("No", "Yes"))
 
 # PCAs on only corals that had some history of antibiotic treatment
 plot_ordination(ps.amr.bl.treated_clr, ps.amr.bl.treated_clr_euc, type="samples", 
@@ -635,7 +503,7 @@ Use breakaway to test the richness estimation and covariates
 # Change levels
 sample_data(bl.psobj)$Condition_At_Sampling <- factor(sample_data(bl.psobj.agg)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
 
-sample_data(bl.psobj)$Fate_after_SP1 <- factor(sample_data(bl.psobj.agg)$Fate_after_SP1, levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
+sample_data(bl.psobj)$Fate_after_SP1 <- factor(sample_data(bl.psobj.agg)$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
 
 richness_bl.og <- bl.psobj %>% breakaway
 plot(richness_bl.og, physeq=bl.psobj, color="Condition_At_Sampling")
@@ -657,7 +525,7 @@ combined_richness.bl <- meta.bl %>%
                   levels=c("No", "Yes", "NoTreatments"))) %>%
   mutate(Fate_after_SP1 = 
            factor(Fate_after_SP1,
-                  levels=c("Recovered", "Unaffected", "Will be diseased", "Diseased")))
+                  levels=c("Unaffected", "Recovered", "Will be diseased", "Diseased")))
 
 # Test for an impact of disease on richness
 bt_disease_fixed <- betta(formula = estimate ~ Fate_after_SP1, 
@@ -700,7 +568,7 @@ I would like to put all the beta-lactamase genes together
 wrap_plots(wrap_plots(richness, amr_pca, guides = "collect", widths = c(1,1.5)),
            wrap_plots(betalactam.tax), nrow = 2, heights = c(1,1.3), axis_titles = "collect")
 
-ggsave("../figures/AMR_beta-lactamase_wPCA_08.07.25.pdf", width = 12, height = 8)
+ggsave("../figures/AMR_beta-lactamase_wPCA_08.11.25.pdf", width = 12, height = 8)
 ```
 
 ### SUPP FIGURE - Graphs together

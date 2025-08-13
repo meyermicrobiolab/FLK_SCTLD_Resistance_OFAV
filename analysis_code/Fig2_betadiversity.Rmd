@@ -226,7 +226,7 @@ betadisp_disease <- ggplot(disp.disease.meta, aes(x = Condition_At_Sampling,
 betadisp_disease
 ```
 
-### Figure - Disease at sampling
+### Figure - Condition at sampling
 ```{r}
 ggarrange(disease_pca_final, betadisp_disease, labels = c("a.", "b."), common.legend = TRUE, legend = "right", widths = c(2,1))
 #ggsave("../figures/PCA_disease_at_sampling_ZooxNew.pdf", width = 10, height = 5)
@@ -234,7 +234,7 @@ ggarrange(disease_pca_final, betadisp_disease, labels = c("a.", "b."), common.le
 ### POTENTIAL NEW FIGURE FOR MAIN MS
 disp.disease.meta$Fate_after_SP1 <- 
               factor(disp.disease.meta$Fate_after_SP1, 
-                                 levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
+                                 levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
 
 betadisp_disease_new <- ggplot(disp.disease.meta, aes(x = Condition_At_Sampling, 
                                                   y = distances)) +
@@ -258,7 +258,7 @@ betadisp_disease_new
 ```{r}
 sample_data(ps.prok_clr)$Fate_after_SP1 <- 
               factor(sample_data(ps.prok_clr)$Fate_after_SP1, 
-                                 levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
+                                 levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
 sample_data(ps.prok_clr)$Condition_At_Sampling <- 
               factor(sample_data(ps.prok_clr)$Condition_At_Sampling, 
                                  levels = c("Apparently Healthy", "Actively Diseased"))
@@ -291,7 +291,7 @@ distances <- disp.fate$distances
 disp.fate.meta <- cbind(distances, ps.prok.clr_meta)
 
 # Set the levels so the graphs match
-disp.fate.meta$Fate_after_SP1 <- factor(disp.fate.meta$Fate_after_SP1, levels = c("Recovered", "Unaffected", "Will be diseased", "Diseased"))
+disp.fate.meta$Fate_after_SP1 <- factor(disp.fate.meta$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
 disp.fate.meta$Condition_At_Sampling <- factor(disp.fate.meta$Condition_At_Sampling, 
                                                               levels = c("Apparently Healthy", "Actively Diseased"))
 
@@ -321,7 +321,47 @@ betadisp_fate <- ggplot(disp.fate.meta, aes(x = Fate_after_SP1, y = distances)) 
 betadisp_fate
 ```
 
-### Supp. Figure - Fate
+### Supp Analysis - Will be diseased
+I noticed that the Will be diseased category is not significantly different in microbial dispersion compared to the diseased category. We are interested in understanding if this has anything to do with the months until disease onset for these "Will be diseased" corals. I will check out my figures because I think I looked into this at some point. The valuable column here is "Months_after_sampling_when_observed_diseased".
+I will do a regression. Essentially, I'd predict that when disease is coming soon, the dispersion will be higher (more dysbiotic).
+I also think history will matter. Some of the "Will be diseased" corals had previous history of disease, but were unaffected at sampling and got diseased again in the future, while other "Will be diseased" corals had no history of disease, but still got diseaed. 
+
+```{r}
+disp.fate.meta.wbd <- filter(disp.fate.meta, Fate_after_SP1 == "Will be diseased")
+
+# Does dispersion increase when disease is sooner to come? NO
+lmtest <- lm(distances ~ Months_after_sampling_when_observed_diseased, data = disp.fate.meta.wbd)
+summary(lmtest)
+
+months <- ggplot(disp.fate.meta.wbd, aes(x = Months_after_sampling_when_observed_diseased, y = distances)) +
+  geom_point(size = 4) +
+  geom_smooth(method = "lm", se = FALSE, color = "darkgray") +
+  ggrepel::geom_text_repel(label = disp.fate.meta.wbd$CoralID, nudge_x = 2, nudge_y = 5, color = "black") +
+  ylab("Distance to Centroid") +
+  xlab("Months after sampling of disease onset")
+
+months
+
+# Does history of disease influence microbial dispersion for will be diseased colonies?
+wilcox.test(distances ~ Disease_before_SP1, data = disp.fate.meta.wbd)
+
+history <- ggplot(disp.fate.meta.wbd, aes(x = Disease_before_SP1, y = distances)) +
+  geom_boxplot(lwd = 1, outlier.shape = NA, color = "darkgray") +
+  stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1, color = "darkgray") +
+  geom_jitter(position=position_jitter(width=.1, height=0), size = 5) +
+  ylab("Distance to Centroid") +
+  ggrepel::geom_text_repel(label = disp.fate.meta.wbd$CoralID, color = "black") +
+  xlab("Disease prior to sampling")
+
+history
+
+ggarrange(months, history)
+
+ggsave("../figures/Dispersion_WillbeDisease.pdf", width = 7, height = 4)
+```
+
+
+### Main Figure - Fate
 ```{r}
 ggarrange(fate_pca_final, betadisp_fate, labels = c("a.", "b."), common.legend = TRUE, legend = "right")
 #ggsave("../figures/PCA_fate.pdf", width = 11, height = 5)
@@ -486,5 +526,5 @@ location_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples",
 ### Figures together - SUPPLEMENT
 ```{r}
 ggarrange(clone_pca, location_pca, labels = c("a.", "b."), widths = c(2,1))
-ggsave("../figures/PCA_reef_clone_Jul25.pdf", width = 13, height = 5)
+#ggsave("../figures/PCA_reef_clone_Jul25.pdf", width = 13, height = 5)
 ```
