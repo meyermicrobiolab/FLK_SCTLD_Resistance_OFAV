@@ -35,7 +35,7 @@ library(scales)
 ## Read in data
 ```{r}
 # Load metadata
-metadata <- as.data.frame(read_excel("../data/RRC_sample_CoreSiteData_v10_RRCCoreData_SP1.xlsx", na = "NA"))
+metadata <- as.data.frame(read_excel("../data/RRC_sample_CoreSiteData_v10_RRCCoreData_SP1_Keys_OFAV.xlsx", na = "NA"))
 rownames(metadata) <- metadata$CoralID
 ```
 
@@ -168,7 +168,7 @@ barplot <- ggplot(FLK_zoox, aes(x = CoralID, y = Symbiont_Density, fill = Symbio
 Put the plots together
 ```{r}
 ggarrange(pie, barplot, widths = c(1,1.5), labels = c("a.", "b."))
-ggsave("../figures/zoox_composition_NEW.pdf", width = 12, height = 5)
+#ggsave("../figures/zoox_composition_NEW.pdf", width = 12, height = 5)
 
 table(FLK_metadata$Zoox_composition_New)
 
@@ -178,82 +178,27 @@ table(FLK_metadata$treat_type)
 
 summary(FLK_metadata$Total_treatments_before_coring)
 ```
-# Zoox composition fix
-Check the zoox composition stuff for ALL the data. Not just for the Florida Keys. That way you can give info to Alli and the RRC
-```{r}
-zoox_comp_all <- metadata %>% 
-  dplyr::select(CoralID, Zoox_dominant, Zoox_background, Total_Symb_Density, Breviolum_density, Cladocopium_density, Durusdinium_density, Zoox_composition) %>%
-  mutate(Symb_density_check = Breviolum_density + Cladocopium_density + Durusdinium_density) %>%
-  mutate(symb_density_match = ifelse(Total_Symb_Density == Symb_density_check, "good", "ERROR")) %>% # Looks like everything was correctly calculated
-  mutate(B_prop = Breviolum_density / Total_Symb_Density) %>%
-  mutate(C_prop = Cladocopium_density / Total_Symb_Density) %>%
-  mutate(D_prop = Durusdinium_density / Total_Symb_Density) %>% 
-  dplyr::select(CoralID, Zoox_dominant, Zoox_background, B_prop, C_prop, D_prop, Zoox_composition)
-zoox_comp_all
-```
 
-List of samples where the `Zoox_dominant` and `Zoox_background` were incorrect
-
-Zoox_dominant wrong samples (explain error)
-3421 - says "C", but the data show only Durusdinium
-1819 (ECA) - says "C", but the data show ~70% breviolum, and ~30% Cladocopium, so need to change to B
-2026 (ECA) - says "C", but the data show ~70% breviolum, and ~30% Cladocopium, so need to change to B
-2027 (ECA) - says "C", but not sure where this came from. There is no data from the B/C/D density information in the metadata file (All are -999)
-
-Zoox_background wrong samples (explain error)
-675 - says "none", but data show there is Cladocopium in the background
-679 - says "CD", but data show there is only Cladocopium in the background (no D)
-689 - says "C", but there is only Durusdinium in the background (no C)
-741 - says "none", but the data show there is Durusdinium in the background
-1280 - says "none", but the data show there is Cladocopium in the background
-3421 - says "D", but the data show only Durusdinium, so background should be "none"
-4616 - says "none", but the data show Durusdinium in the background
-N46 - says "none", but the data show Durusdinium in the background
-N49 - says "none", but the data show Durusdinium in the background
-1813 (ECA) - says "none", but data show there is Cladocopium in the background
-1724 (ECA) - says "none", but the data show there is Durusdinium in the background
-1743 (ECA) - says "none", but the data show there is Durusdinium in the background
-2964 (ECA) - says "none", but data show there is Cladocopium in the background
-2579 (ECA) - says "none", but data show there is both Cladocopium and Durusdinium in the background
-2126 (ECA) - says "none", but data show there is background Breviolum
-2127 (ECA) - says "none", but the data show there is Durusdinium in the background
-1552 (ECA) - says "none", but data show there is Cladocopium in the background
-2311 (ECA) - says "none", but data show there is Cladocopium in the background
-1819 (ECA) - says "none", but data show there is ~30% Cladocopium in the background
-2026 (ECA) - says "none", but data show there is ~30% Cladocopium in the background
-2027 (ECA) - says "none", but not sure where this came from. There is no data from the B/C/D density information in the metadata file (All are -999)
-
-THAT IS A LOT OF ERRORS!!!! I made a new column called "Zoox_composition" that has composition as a category based on the above calculated proportions, which were generated from the Symbiont_density information. I'm honestly not sure where this came from, though. 
-
-I am going to make a figure of all the samples, and which ones had incorrect information. 
+# Make a plot by colony fate
 ```{r}
 # can I make a stacked bar plot of the actual symbiont composition?
-zoox <- metadata %>% 
-  dplyr::select(CoralID, Zoox_composition, Region, Location, Disease_on_colony_when_coring_binary, Breviolum_density, Cladocopium_density, Durusdinium_density) %>%
-  gather(key = "Symbiont", value = "Symbiont_Density", Breviolum_density:Durusdinium_density) %>%
-  filter(CoralID != "2027") # Remove 2027 since there is an NA for symbiont composition due to no density data
+FLK_zoox_fate <- FLK_metadata %>% 
+  dplyr::select(CoralID, Zoox_composition_New, Disease_on_colony_when_coring_binary, Fate_after_SP1, propBreviolum, propCladocopium, propDurusdinium) %>%
+  gather(key = "Symbiont", value = "Symbiont_Density", propBreviolum:propDurusdinium)
 
-ggplot(zoox, aes(x = CoralID, y = Symbiont_Density, fill = Symbiont)) +
-  geom_bar(position = "fill", stat = "identity") +
-  facet_wrap(. ~ Region + Location, scales = "free_x") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  theme(legend.position = "bottom")
+FLK_zoox_fate$Fate_after_SP1 <- factor(FLK_zoox_fate$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
 
-ggplot(zoox, aes(x = CoralID, y = Symbiont_Density, fill = Symbiont)) +
+barplot_fate <- ggplot(FLK_zoox_fate, aes(x = CoralID, y = Symbiont_Density, fill = Symbiont)) +
   geom_bar(position = "fill", stat = "identity") +
-  facet_wrap(. ~ Region + Zoox_composition, scales = "free_x", ncol = 5) +
+  facet_wrap(. ~ Fate_after_SP1 + Zoox_composition_New, scales = "free_x", ncol = 7) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  theme(legend.position = "bottom")
-ggsave("../figures/Zoox_composition_ALL.pdf", width = 14, height = 6)
+  scale_fill_manual(values = c("gray80", "gray60", "black")) +
+  theme(legend.position = "bottom") +
+  labs(x = "Coral Colony ID", y = "Symbiont density")
 
-ggplot(zoox, aes(x = CoralID, y = Symbiont_Density, fill = Symbiont)) +
-  geom_bar(position = "fill", stat = "identity") +
-  facet_grid(. ~ Region + Zoox_composition, scales = "free_x", space = "free") +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-  theme(legend.position = "bottom")
-ggsave("../figures/Zoox_composition_ALL_2.png", width = 20, height = 4)
+ggarrange(pie, barplot_fate, widths = c(1,1.5), labels = c("a.", "b."))
+#ggsave("../figures/zoox_composition_fate.pdf", width = 12, height = 5)
 ```
-
 
 
 
