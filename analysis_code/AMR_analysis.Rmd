@@ -33,6 +33,7 @@ library(cowplot)
 library(microViz)
 library(patchwork) # for arranging groups of plots
 library(breakaway)
+library(RColorBrewer)
 ```
 
 # Read in data
@@ -396,7 +397,7 @@ Some important variables:
 ```{r}
 metadata_prok$Fate_after_SP1 <- factor(metadata_prok$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
 
-sample_data(ps.amr.bl_clr)$Recent_Treatment_Less_than_two_months <- factor(sample_data(ps.amr.bl_clr)$Recent_Treatment_Less_than_two_months, levels = c("No", "Yes", "NoTreatments"))
+sample_data(ps.amr.bl_clr)$Treatment_History <- factor(sample_data(ps.amr.bl_clr)$Treatment_History, levels = c("No Treatment", "Treatment >2 months", "Recent treatment <2 months"))
 
 sample_data(ps.amr.bl_clr)$Fate_after_SP1 <- factor(sample_data(ps.amr.bl_clr)$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
 
@@ -415,16 +416,24 @@ plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples",
   coord_fixed() +
   labs(color = "Amoxicillin treatments pre-sampling", shape = "Colony Fate")
 
-amr_pca <- plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
-                color="Recent_Treatment_Less_than_two_months", 
-                shape ="Fate_after_SP1") +
-  geom_point(size = 4) +
-  coord_fixed() +
-  labs(color = "Recent treatment (<2 mo.)", shape = "Colony Fate")+
-  scale_shape_manual(values = c(16, 15, 17, 18)) +
-  scale_color_manual(values = c("darkgreen", "orange", "gray"))
+plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
+                shape ="Fate_after_SP1", color = "Treatment_History")
 
-amr_pca 
+amr_pca <- plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples", 
+                shape ="Fate_after_SP1") +
+  coord_fixed()
+
+amr_pca$layers
+amr_pca$layers <- amr_pca$layers[-1]
+
+amr_pca_final <- amr_pca +
+  geom_point(size = 4, aes(fill = Treatment_History)) +
+  labs(color = "Treatment History", shape = "Colony Fate")+
+  scale_shape_manual(values = c(21, 22, 23, 24)) +
+  scale_fill_manual(values = c("#FDD49E", "#EF6548", "#7F0000"))
+
+amr_pca_final
+#ggsave("../figures/AMR_beta-lactamase_PCA_10.16.25.pdf")
 
 # PERMANOVA for amoxicillin treatments
 set.seed(10)
@@ -434,7 +443,7 @@ set.seed(10)
 adonis2(formula = ps.amr.bl.euc_diss ~ Number_treatments_PreSampling, data = ps.amr.bl.clr_meta, permutations = 999) 
 
 set.seed(10)
-adonis2(formula = ps.amr.bl.euc_diss ~ Recent_Treatment_Less_than_two_months, data = ps.amr.bl.clr_meta, permutations = 999) 
+adonis2(formula = ps.amr.bl.euc_diss ~ Treatment_History, data = ps.amr.bl.clr_meta, permutations = 999) 
 ```
 What if I only subset corals that had any history of treatment? Remove all corals that were not treated at ALL over the course of the study?
 
@@ -501,9 +510,11 @@ Graph richness but NOT using the agglomerated table. This way you treat each ind
 Use breakaway to test the richness estimation and covariates
 ```{r}
 # Change levels
-sample_data(bl.psobj)$Condition_At_Sampling <- factor(sample_data(bl.psobj.agg)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
+sample_data(bl.psobj)$Condition_At_Sampling <- factor(sample_data(bl.psobj)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
 
-sample_data(bl.psobj)$Fate_after_SP1 <- factor(sample_data(bl.psobj.agg)$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
+sample_data(bl.psobj)$Fate_after_SP1 <- factor(sample_data(bl.psobj)$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
+
+sample_data(bl.psobj)$Treatment_History <- factor(sample_data(bl.psobj)$Treatment_History, levels = c("No Treatment", "Treatment >2 months", "Recent treatment <2 months"))
 
 richness_bl.og <- bl.psobj %>% breakaway
 plot(richness_bl.og, physeq=bl.psobj, color="Condition_At_Sampling")
@@ -520,9 +531,9 @@ combined_richness.bl <- meta.bl %>%
   mutate(Condition_At_Sampling = 
            factor(Condition_At_Sampling,
                   levels=c("Apparently Healthy", "Actively Diseased"))) %>%
-  mutate(Recent_Treatment_Less_than_two_months = 
-           factor(Recent_Treatment_Less_than_two_months,
-                  levels=c("No", "Yes", "NoTreatments"))) %>%
+  mutate(Treatment_History = 
+           factor(Treatment_History,
+                  levels=c("No Treatment", "Treatment >2 months", "Recent treatment <2 months"))) %>%
   mutate(Fate_after_SP1 = 
            factor(Fate_after_SP1,
                   levels=c("Unaffected", "Recovered", "Will be diseased", "Diseased")))
@@ -543,19 +554,45 @@ bt_treatments_fixed <- betta(formula = estimate ~ Number_treatments_PreSampling,
 bt_treatments_fixed$table
 
 # Test for an impact of treatment history (recent = <2 months, versus a while ago)
-bt_treatments_fixed <- betta(formula = estimate ~ Recent_Treatment_Less_than_two_months, 
+bt_treatments_fixed <- betta(formula = estimate ~ Treatment_History, 
                       ses = error, data = combined_richness.bl)
 bt_treatments_fixed$table
 
 # Plot estimated richness 
 richness <- ggplot(combined_richness.bl, aes(x = Total_treatments_before_coring, y = estimate)) +
-  geom_point(size = 4, aes(color = Recent_Treatment_Less_than_two_months,
+  geom_point(size = 4, aes(fill = Treatment_History,
                            shape = Fate_after_SP1)) +
   geom_smooth(method = "lm", se = FALSE, color = "black") +
-  labs(x = "Total amoxicillin treatments before sampling", y = "Estimated richness of beta-lactamase genes", color = "Recent treatment (<2 mo.)", shape = "Colony Fate") +
-  scale_shape_manual(values = c(16, 15, 17, 18)) +
-  scale_color_manual(values = c("darkgreen", "orange", "gray"))
+  labs(x = "Total amoxicillin treatments before sampling", y = "Estimated richness of beta-lactamase genes", fill = "Treatment_History", shape = "Colony Fate") +
+  scale_shape_manual(values = c(21, 22, 23, 24)) +
+  scale_fill_manual(values = c("#FDD49E", "#EF6548", "#7F0000"))
 richness
+
+ggsave("../figures/AMR_beta-lactamase_10.16.25.pdf")
+
+# Plot estimated richness for only the recently treated corals
+# Filter for only the recently treated corals
+combined_richness.bl.recenttreat <- combined_richness.bl %>%
+  filter(Treatment_History == "Recent treatment <2 months")
+
+# Test for an impact of treatments on richness
+bt_treatments_fixed <- betta(formula = estimate ~ Number_treatments_PreSampling, 
+                      ses = error, data = combined_richness.bl.recenttreat)
+bt_treatments_fixed$table
+
+# Test for an impact of treatments on richness - scaled by size
+bt_treatments_fixed <- betta(formula = estimate ~ Estimated_Num_treatments_Per_sq_m, 
+                      ses = error, data = combined_richness.bl)
+bt_treatments_fixed$table
+
+#plot - negative results there too
+ggplot(combined_richness.bl.recenttreat, aes(x = Total_treatments_before_coring, y = estimate)) +
+  geom_point(size = 4, aes(fill = Treatment_History,
+                           shape = Fate_after_SP1)) +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  labs(x = "Total amoxicillin treatments before sampling", y = "Estimated richness of beta-lactamase genes", fill = "Treatment_History", shape = "Colony Fate") +
+  scale_shape_manual(values = c(24)) +
+  scale_fill_manual(values = c("#7F0000"))
 ```
 
 # MAIN MS FIG
@@ -565,10 +602,10 @@ I would like to put all the beta-lactamase genes together
 #          betalactam.tax, widths = c(1.5, 1), labels = c("", "c.")), 
 #          blactams, nrow = 2, labels = c("", "d."))
 
-wrap_plots(wrap_plots(richness, amr_pca, guides = "collect", widths = c(1,1.5)),
+wrap_plots(wrap_plots(richness, amr_pca_final, guides = "collect", widths = c(1,1.5)),
            wrap_plots(betalactam.tax), nrow = 2, heights = c(1,1.3), axis_titles = "collect")
 
-ggsave("../figures/AMR_beta-lactamase_wPCA_08.11.25.pdf", width = 12, height = 8)
+ggsave("../figures/AMR_beta-lactamase_all_10.16.25.pdf", width = 12, height = 8)
 ```
 
 ### SUPP FIGURE - Graphs together
