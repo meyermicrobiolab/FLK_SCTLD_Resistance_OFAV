@@ -112,9 +112,7 @@ amr$ORF_ID %>% unique %>% length
 
 # AMR analysis
 
-
 ## Stacked bar plot
-
 
 A whopping 129,772 AMR genes don't have a taxonomic ID. I will remove those to get a better look at what taxa are making up the classified AMR genes. 
 
@@ -200,7 +198,6 @@ ps.genefam
 sample_data(ps.genefam)$Condition_At_Sampling <- factor(sample_data(ps.genefam)$Condition_At_Sampling,
                                                         levels = c("Apparently Healthy", "Actively Diseased"))
 
-
 # Visualize the amr gene families, using the ID, since it is shorter. I can match up the actual name later
 genefam <- ps.genefam %>%
   comp_barplot(tax_level = "AMR_Gene_Family_ID", 
@@ -234,6 +231,24 @@ print(unique_combinations)
 
 # How many gene families are there? 437
 tax_table(ps.genefam)[,1] %>% unique
+
+# What proportion is the top 15 families?
+genefam_sums <- taxa_sums(ps.genefam)
+top15_genefams <- names(sort(genefam_sums, decreasing = TRUE))[1:15]
+genefams_relabund <- transform_sample_counts(ps.genefam, function(x) x / sum(x))
+# Subset to just those top taxa
+genefams_top15_ps <- prune_taxa(top15_genefams, genefams_relabund)
+
+# Sum their total relative abundance across all samples
+top15_genefams_total_rel_abund <- sum(taxa_sums(genefams_top15_ps)) / sum(taxa_sums(genefams_relabund))
+top15_genefams_total_rel_abund
+
+# Sample-specific relative abundances
+sample_sums_top15_genefams <- sample_sums(prune_taxa(top15_genefams, genefams_relabund))
+sample_sums_total_genefams <- sample_sums(genefams_relabund)
+rel_abund_per_sample_genefams <- sample_sums_top15_genefams / sample_sums_total_genefams
+
+summary(rel_abund_per_sample_genefams)
 ```
 
 
@@ -356,6 +371,23 @@ blactams <- bl.psobj.agg %>%
 
 blactams
 
+# What proportion is the top 15 families?
+bl_sums <- taxa_sums(bl.psobj.agg)
+top15_bl <- names(sort(bl_sums, decreasing = TRUE))[1:15]
+bl_relabund <- transform_sample_counts(bl.psobj.agg, function(x) x / sum(x))
+# Subset to just those top taxa
+bl_top15_ps <- prune_taxa(top15_bl, bl_relabund)
+
+# Sum their total relative abundance across all samples
+top15_bl_total_rel_abund <- sum(taxa_sums(bl_top15_ps)) / sum(taxa_sums(bl_relabund))
+top15_bl_total_rel_abund
+
+# Sample-specific relative abundances
+sample_sums_top15_bl <- sample_sums(prune_taxa(top15_bl, bl_relabund))
+sample_sums_total_bl <- sample_sums(bl_relabund)
+rel_abund_per_sample_bl <- sample_sums_top15_bl / sample_sums_total_bl
+
+summary(rel_abund_per_sample_bl)
 ```
 
 
@@ -610,7 +642,7 @@ ggsave("../figures/AMR_beta-lactamase_all_10.16.25.pdf", width = 12, height = 8)
 
 ### SUPP FIGURE - Graphs together
 ```{r}
-wrap_plots(rest.mech, genefam,blactams, nrow = 3, axis_titles = "collect_x")
+wrap_plots(rest.mech, genefam, blactams, nrow = 3, axis_titles = "collect_x")
 
 #ggsave("../figures/AMR_all_betalactams_stacked_bar_08.07.25.pdf", width = 12, height = 15)
 ```

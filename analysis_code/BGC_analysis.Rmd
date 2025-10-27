@@ -168,7 +168,7 @@ ggplot(BGC_data,
         strip.text = element_text(size=10, face="bold"),
         plot.title = element_text(size=20, face="bold"))
 
-ggsave("../figures/BGC_alluvial_8.12.25.pdf", width = 9, height = 12)
+#ggsave("../figures/BGC_alluvial_8.12.25.pdf", width = 9, height = 12)
 ```
 
 I'd like to look at only the antimicrobial-type compounds and what the compounds are that they were closely annotated as. I also only want to focus on those BGC's that had a hit in the MIBiG database as I can be more confident on potential functions. This might be best in a table-based format:
@@ -233,14 +233,14 @@ ann_colors <- list(
   Colony_Fate = c(Unaffected = "#482173", Recovered = "#2e6f8e", `Will be diseased` = "#29af7f", Diseased = "#FFC20A"),
   Activity_General = c(
     "antimicrobial" = "#990F26", 
-    "antimicrobial, cytotoxic" = "#B33E52", 
-    "antimicrobial precursor" = "#CC7A88",
-    "antimicrobial defense" = "#E6B8BF", 
-    "antibiotic resistance" = "#99600F",
-    "cytotoxic" = "#B3823E", 
-    "phytotoxic" = "#CCAA7A",
-    "toxin" = "#E6D2B8",
-    "virulence factor" = "#54990F"
+    "antimicrobial, cytotoxic" = "#CC7A88", 
+    "antimicrobial precursor" = "#99600F",
+    "antimicrobial defense" = "#CCAA7A", 
+    "antibiotic resistance" = "#54990F",
+    "cytotoxic" = "#CFE6B8", 
+    "phytotoxic" = "#3E9FB3",
+    "toxin" = "#B8DEE6",
+    "virulence factor" = "#967ACC"
   )
 )
 
@@ -286,10 +286,12 @@ pheatmap(antibac_presabs_forheatmap,
         annotation_colors = ann_colors,
         annotation_col = annotation_col, 
         color = bw_colors,
-        cluster_rows = TRUE, cluster_cols = TRUE)
+        cluster_rows = TRUE, cluster_cols = TRUE,
+        clustering_distance_rows = "euclidean", 
+        clustering_distance_cols = "euclidean")
 
 # Save heatmap to PDF
-pdf("../figures/BGC_antimicrobial_heatmap_8.12.25.pdf", width = 13, height = 9)
+pdf("../figures/BGC_antimicrobial_heatmap_10.27.25.pdf", width = 13, height = 9)
 pheatmap(antibac_presabs_forheatmap, 
         annotation_row = annotation_row, 
         annotation_colors = ann_colors,
