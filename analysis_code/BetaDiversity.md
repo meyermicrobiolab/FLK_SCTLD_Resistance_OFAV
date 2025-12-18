@@ -11,15 +11,13 @@ output:
     theme: united
 ---
 
-```{r setup, echo=FALSE}
-knitr::opts_chunk$set(echo = TRUE, fig.retina = 2, fig.path = "../figures/fig-betadiv-")
-setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
-```
+
 
 # Setup
 ## Install necessary packages
 
-```{r packages, message=FALSE, warning=FALSE, results='hide'}
+
+``` r
 # For data wrangling
 library(readxl)
 library(stringr)
@@ -45,7 +43,8 @@ The data included here are abundances on all prokaryote genes in a Orbicella fav
 ## Data 
 
 Data tables can be downloaded from Zenodo: https://doi.org/10.5281/zenodo.11493775 
-```{r}
+
+``` r
 # Load table with count abundances from salmon ("numreads")
 prokreads <- read.table("../data/FLK_OFAV_MG_prok_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
 prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
@@ -64,7 +63,8 @@ colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
 
 ## Phyloseq object
 Start with a phyloseq object jsut with the count data (no annotation information). The annotations aren't needed for the PCAs I make here.
-```{r}
+
+``` r
 ## Make phyloseq object of count-related data 
 idx <- match(colnames(prokreads_nozero), rownames(metadata))
 metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced Florida Keys samples, and no Orbicella franksi coral data. 
@@ -76,10 +76,17 @@ ps.prok <- phyloseq(NUMREADS, META)
 ps.prok
 ```
 
+```
+## phyloseq-class experiment-level object
+## otu_table()   OTU Table:         [ 247254 taxa and 41 samples ]
+## sample_data() Sample Data:       [ 41 samples by 40 sample variables ]
+```
+
 ## Transform data and dissimilarity
 I have a matrix of read counts in different coral samples for each gene. To account for the compositional nature of this dataset (limited sequencing output), I am going to use centered log-ratio transformation on the read counts for the analysis of these data. I will visualize everything in Aitchison distance since it is more compositionally aware and robust to subsetting. 
 
-```{r}
+
+``` r
 # transform the data using centered log-ratio transformations
 ps.prok_clr <- microbiome::transform(ps.prok, 'clr')
 
@@ -99,7 +106,8 @@ ps.prok.euc_diss <- vegdist(ps.prok.clr_otu, method = "euclidean")
 a) Principal components analysis (PCA) of coral tissue prokaryotic functional microbiome beta diversity (Aitchison distance) colored by colony fate with point shape reflecting the condition of the coral at sampling. b) Prokaryotic functional beta diversity dispersion measured as the distance to centroid was greater in colonies with diseased fates relative to recovered or unaffected fates (Wilcoxon rank sum test, p < 0.05).  c) Prokaryotic functional beta diversity dispersion measured as the distance to centroid was greater in actively diseased colonies relative to apparently healthy colonies (Wilcoxon rank sum test, p < 0.05). 
 
 ## Figure 3b betadisper fate
-```{r}
+
+``` r
 # Run betadisper function from vegan
 # Hypothesis - Colony fate explains the variability in the functional microbiome
 disp.fate <- betadisper(ps.prok.euc_diss, ps.prok.clr_meta$Fate_after_SP1)
@@ -115,16 +123,51 @@ disp.fate.meta$Condition_At_Sampling <- factor(disp.fate.meta$Condition_At_Sampl
 
 # Are the data normally distributed in each group?
 shapiro.test(disp.fate.meta$distances) # data not normal
+```
 
+```
+## 
+## 	Shapiro-Wilk normality test
+## 
+## data:  disp.fate.meta$distances
+## W = 0.91511, p-value = 0.004777
+```
+
+``` r
 # Do a Kruskal-Wallis test (nonparametric) to see if there are significant differences in the dispersion by fate
 # My question: Is there a significant difference in dispersion between fate groups?
 kruskal.test(distances ~ Fate_after_SP1, data = disp.fate.meta)
+```
 
+```
+## 
+## 	Kruskal-Wallis rank sum test
+## 
+## data:  distances by Fate_after_SP1
+## Kruskal-Wallis chi-squared = 11.956, df = 3, p-value = 0.007534
+```
+
+``` r
 #Pairwise tests using the Wilcoxon rank sum test with Benjamini-Hochberg correction for multiple testing, which creates an adjusted P value:
 pairwise.wilcox.test(disp.fate.meta$distances, disp.fate.meta$Fate_after_SP1, p.adjust.method = "BH") 
 ```
+
+```
+## 
+## 	Pairwise comparisons using Wilcoxon rank sum exact test 
+## 
+## data:  disp.fate.meta$distances and disp.fate.meta$Fate_after_SP1 
+## 
+##                  Unaffected Recovered Will be diseased
+## Recovered        0.553      -         -               
+## Will be diseased 0.673      0.390     -               
+## Diseased         0.029      0.014     0.189           
+## 
+## P value adjustment method: BH
+```
 ## Figure 3c betadisper condition at sampling
-```{r}
+
+``` r
 # Run betadisper function from vegan
 # Hypothesis - Colony fate explains the variability in the functional microbiome
 disp.disease <- betadisper(ps.prok.euc_diss, ps.prok.clr_meta$Condition_At_Sampling)
@@ -135,11 +178,32 @@ disp.disease.meta <- cbind(distances, ps.prok.clr_meta)
 
 # Are the data normally distributed in each group?
 shapiro.test(disp.disease.meta$distances) # data not normal
+```
 
+```
+## 
+## 	Shapiro-Wilk normality test
+## 
+## data:  disp.disease.meta$distances
+## W = 0.90661, p-value = 0.002614
+```
+
+``` r
 # Using the Wilcoxon rank sum test to examine if there is a significant difference between unaffected and diseased coral microbiomes. Need wilcox test becouse I have two groups. 
 wilcox.test(distances ~ Condition_At_Sampling, 
             data = disp.disease.meta)
+```
 
+```
+## 
+## 	Wilcoxon rank sum exact test
+## 
+## data:  distances by Condition_At_Sampling
+## W = 307, p-value = 0.01074
+## alternative hypothesis: true location shift is not equal to 0
+```
+
+``` r
 # Set levels
 disp.disease.meta$Condition_At_Sampling <- 
   factor(disp.disease.meta$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
@@ -151,7 +215,8 @@ disp.disease.meta$Fate_after_SP1 <-
 ```
 
 ## Figure 3a-c visualization
-```{r fate}
+
+``` r
 fate_pca_new <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
                 shape = "Condition_At_Sampling") +
   coord_fixed() 
@@ -159,7 +224,16 @@ fate_pca_new <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples",
  # scale_color_manual(values = c("gray40", "black",  "gray70", "gray90"))
 
 fate_pca_new$layers
+```
 
+```
+## [[1]]
+## geom_point: na.rm = TRUE
+## stat_identity: na.rm = TRUE
+## position_identity
+```
+
+``` r
 fate_pca_new$layers <- fate_pca_new$layers[-1]
 
 fate_pca_final_new <- fate_pca_new + 
@@ -178,8 +252,18 @@ betadisp_fate_new <- ggplot(disp.fate.meta, aes(x = Fate_after_SP1, y = distance
   scale_shape_manual(values = c(21, 24)) +
   scale_fill_manual(values = c("#482173", "#2e6f8e",  "#29af7f", "#FFC20A")) +
   labs(fill = "Colony Fate", shape = "Condition at sampling", x = "Colony Fate")
+```
 
+```
+## Warning: The `legend.text.align` argument of `theme()` is deprecated as of ggplot2
+## 3.5.0.
+## ℹ Please use theme(legend.text = element_text(hjust)) instead.
+## This warning is displayed once every 8 hours.
+## Call `lifecycle::last_lifecycle_warnings()` to see where this warning was
+## generated.
+```
 
+``` r
 betadisp_disease_new <- ggplot(disp.disease.meta, aes(x = Condition_At_Sampling, 
                                                   y = distances)) +
   geom_boxplot(lwd = 0.5, outlier.shape = NA) +
@@ -197,11 +281,14 @@ betadisp_disease_new <- ggplot(disp.disease.meta, aes(x = Condition_At_Sampling,
 ggarrange(fate_pca_final_new, betadisp_fate_new, betadisp_disease_new, labels = c("a.", "b.", "c."), common.legend = TRUE, legend = "right", widths = c(2,1.5,1), nrow = 1)
 ```
 
+<img src="../figures/fig-betadiv-fate-1.png" width="672" />
+
 # Figure 3d-e 
 d) PCA as in (a) colored by Symbiodiniaceae composition. e) Functional prokaryotic beta dispersion differed across Symbiodiniaceae composition groups, with corals containing Breviolum dominant + Cladocopium + Durusdinium exhibiting greater dispersion than Breviolum-only tissues (Tukey Honest Significant Differences post-hoc test, **p < 0.01). Note that the Cladocopium and Durusdinium and the Breviolum and Durusdinium groupings are omitted from panel (d) because there was only one coral in each group. All points are colored by Symbiodiniaceae composition groupings, and shape reflects the colony condition at the time of sampling. The groupings Breviolum and Durusdinium, and Cladocopium and Durusdinium contain both genera making up at least 10% of symbiont community. See Figure S3 in the manuscript for a visualization of the photoendosymbiont composition of all corals.
 
 ## Figure 3d - PCA zoox
-```{r}
+
+``` r
 sample_data(ps.prok_clr)$Condition_At_Sampling <- factor(sample_data(ps.prok_clr)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
 
 # without the labels - want transparency
@@ -210,6 +297,16 @@ symbiont_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples",
   coord_fixed() 
 
 symbiont_pca$layers
+```
+
+```
+## [[1]]
+## geom_point: na.rm = TRUE
+## stat_identity: na.rm = TRUE
+## position_identity
+```
+
+``` r
 symbiont_pca$layers <- symbiont_pca$layers[-1]
 
 symbiont_pca_final <- symbiont_pca + 
@@ -221,7 +318,8 @@ symbiont_pca_final <- symbiont_pca +
 Note that for the symbiodiniaceae results, sample 3421 is the one colony with a dominant genus different (cladocopium) than all the others (breviolum). That coral is all the way out on its own in terms of a functional microbiome and was also consistently diseased. 
 
 ## Figure 3e - betadisper symbiont
-```{r}
+
+``` r
 # Run betadisper function from vegan
 # Hypothesis - Colony fate explains the variability in the functional microbiome
 disp.symbiont <- betadisper(ps.prok.euc_diss, ps.prok.clr_meta$Zoox_composition_New)
@@ -240,23 +338,87 @@ disp.symbiont.meta.no3421or689 <- filter(disp.symbiont.meta.no3421or689, CoralID
 
 # Are the data normally distributed in each group?
 shapiro.test(disp.symbiont.meta.no3421or689$distances) # data normal
+```
 
+```
+## 
+## 	Shapiro-Wilk normality test
+## 
+## data:  disp.symbiont.meta.no3421or689$distances
+## W = 0.97272, p-value = 0.4531
+```
+
+``` r
 # Do a Kruskal-Wallis test (nonparametric) to see if there are significant differences in the dispersion by fate
 # First I need to remove sample 3421 since there is only one coral in that group. It would likely skew the results. 
 
 # My question: Is there a significant difference in dispersion between fate groups?
 kruskal.test(distances ~ Zoox_composition_New, data = disp.symbiont.meta.no3421or689)
+```
 
+```
+## 
+## 	Kruskal-Wallis rank sum test
+## 
+## data:  distances by Zoox_composition_New
+## Kruskal-Wallis chi-squared = 12.28, df = 3, p-value = 0.006484
+```
+
+``` r
 #Pairwise tests using the Wilcoxon rank sum test with Benjamini-Hochberg correction for multiple testing, which creates an adjusted P value:
 pairwise.wilcox.test(disp.symbiont.meta.no3421or689$distances, disp.symbiont.meta.no3421or689$Zoox_composition_New, p.adjust.method = "BH") 
+```
 
+```
+## 
+## 	Pairwise comparisons using Wilcoxon rank sum exact test 
+## 
+## data:  disp.symbiont.meta.no3421or689$distances and disp.symbiont.meta.no3421or689$Zoox_composition_New 
+## 
+##               B      B_dom_plus_C B_dom_plus_CD
+## B_dom_plus_C  0.1889 -            -            
+## B_dom_plus_CD 0.0018 0.1889       -            
+## B_dom_plus_D  0.1889 0.8763       0.4392       
+## 
+## P value adjustment method: BH
+```
+
+``` r
 # NEED TO DO AN ANOVA BECAUSE DATA ARE NORMAL
 zoox_aov <- aov(distances ~ Zoox_composition_New, data = disp.symbiont.meta.no3421or689)
 
 summary(zoox_aov)
+```
 
+```
+##                      Df Sum Sq Mean Sq F value  Pr(>F)   
+## Zoox_composition_New  3 111021   37007   5.715 0.00272 **
+## Residuals            35 226649    6476                   
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+```
+
+``` r
 TukeyHSD(zoox_aov)
+```
 
+```
+##   Tukey multiple comparisons of means
+##     95% family-wise confidence level
+## 
+## Fit: aov(formula = distances ~ Zoox_composition_New, data = disp.symbiont.meta.no3421or689)
+## 
+## $Zoox_composition_New
+##                                 diff         lwr      upr     p adj
+## B_dom_plus_C-B              57.28809  -50.705956 165.2821 0.4893167
+## B_dom_plus_CD-B            142.20251   41.739910 242.6651 0.0028383
+## B_dom_plus_D-B              84.75499   -9.962057 179.4720 0.0930970
+## B_dom_plus_CD-B_dom_plus_C  84.91442  -46.500152 216.3290 0.3177235
+## B_dom_plus_D-B_dom_plus_C   27.46690  -99.609355 154.5431 0.9365647
+## B_dom_plus_D-B_dom_plus_CD -57.44752 -178.188536  63.2935 0.5794928
+```
+
+``` r
 # Plot the results
 betadisp_symbiont <- ggplot(disp.symbiont.meta.no3421or689, aes(x = Zoox_composition_New, y = distances)) +
   geom_boxplot(lwd = 0.5, outlier.shape = NA) +
@@ -271,13 +433,17 @@ betadisp_symbiont <- ggplot(disp.symbiont.meta.no3421or689, aes(x = Zoox_composi
   labs(fill = "Symbiodiniaceae composition", x = "Symbiodiniaceae composition", shape = "Condition at sampling")
 ```
 ## Figure 3d and 3e - Symbiodiniaceae 
-```{r zoox}
+
+``` r
 ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("d.", "e."), common.legend = TRUE, legend = "right")
 ```
 
+<img src="../figures/fig-betadiv-zoox-1.png" width="672" />
+
 # Figure S2 - Clone and Location
 
-```{r clone_location}
+
+``` r
 # Clone PCA
 clone_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
                 color="Clone", shape = "Condition_At_Sampling") +
@@ -299,19 +465,54 @@ location_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples",
 ggarrange(clone_pca, location_pca, labels = c("a.", "b."), widths = c(2,1))
 ```
 
+```
+## Warning: ggrepel: 30 unlabeled data points (too many overlaps). Consider
+## increasing max.overlaps
+```
+
+<img src="../figures/fig-betadiv-clone_location-1.png" width="672" />
+
 # Figure S4 - Will be diseased analysis
 
 I noticed that the Will be diseased category is not significantly different in microbial dispersion compared to the diseased category. We are interested in understanding if this has anything to do with the months until disease onset for these "Will be diseased" corals. I will check out my figures because I think I looked into this at some point. The valuable column here is "Months_after_sampling_when_observed_diseased".
 I will do a regression. Essentially, I'd predict that when disease is coming soon, the dispersion will be higher (more dysbiotic).
 I also think history will matter. Some of the "Will be diseased" corals had previous history of disease, but were unaffected at sampling and got diseased again in the future, while other "Will be diseased" corals had no history of disease, but still got diseaed. 
 
-```{r willbedisease}
+
+``` r
 disp.fate.meta.wbd <- filter(disp.fate.meta, Fate_after_SP1 == "Will be diseased")
 
 # Does dispersion increase when disease is sooner to come? NO
 lmtest <- lm(distances ~ Months_after_sampling_when_observed_diseased, data = disp.fate.meta.wbd)
 summary(lmtest)
+```
 
+```
+## 
+## Call:
+## lm(formula = distances ~ Months_after_sampling_when_observed_diseased, 
+##     data = disp.fate.meta.wbd)
+## 
+## Residuals:
+##     Min      1Q  Median      3Q     Max 
+## -147.03 -107.63  -48.58   72.51  313.91 
+## 
+## Coefficients:
+##                                              Estimate Std. Error t value
+## (Intercept)                                  436.2964    97.2259   4.487
+## Months_after_sampling_when_observed_diseased  -0.1504     4.6456  -0.032
+##                                              Pr(>|t|)   
+## (Intercept)                                   0.00284 **
+## Months_after_sampling_when_observed_diseased  0.97508   
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+## 
+## Residual standard error: 158.8 on 7 degrees of freedom
+## Multiple R-squared:  0.0001497,	Adjusted R-squared:  -0.1427 
+## F-statistic: 0.001048 on 1 and 7 DF,  p-value: 0.9751
+```
+
+``` r
 months <- ggplot(disp.fate.meta.wbd, aes(x = Months_after_sampling_when_observed_diseased, y = distances)) +
   geom_point(size = 4) +
   geom_smooth(method = "lm", se = FALSE, color = "darkgray") +
@@ -321,7 +522,18 @@ months <- ggplot(disp.fate.meta.wbd, aes(x = Months_after_sampling_when_observed
 
 # Does history of disease influence microbial dispersion for will be diseased colonies?
 wilcox.test(distances ~ Disease_before_SP1, data = disp.fate.meta.wbd)
+```
 
+```
+## 
+## 	Wilcoxon rank sum exact test
+## 
+## data:  distances by Disease_before_SP1
+## W = 10, p-value = 0.9048
+## alternative hypothesis: true location shift is not equal to 0
+```
+
+``` r
 history <- ggplot(disp.fate.meta.wbd, aes(x = Disease_before_SP1, y = distances)) +
   geom_boxplot(lwd = 1, outlier.shape = NA, color = "darkgray") +
   stat_boxplot(geom = "errorbar", width = 0.2, lwd = 1, color = "darkgray") +
@@ -333,6 +545,12 @@ history <- ggplot(disp.fate.meta.wbd, aes(x = Disease_before_SP1, y = distances)
 ggarrange(months, history)
 ```
 
+```
+## `geom_smooth()` using formula = 'y ~ x'
+```
+
+<img src="../figures/fig-betadiv-willbedisease-1.png" width="672" />
+
 # Table S4 - PERMANOVA Stats
 I investigate which variables are explaining variability in the microbiome across O. faveolata corals. These are the variables of interest:    
 * colony fate    
@@ -340,38 +558,147 @@ I investigate which variables are explaining variability in the microbiome acros
 * symbiont composition     
 * clone    
 * reef     
-```{r}
+
+``` r
 # Conduct PERMANOVA stats tests
 # Use the dissimilarity matrix from the "Transform data and dissimilarity" section
 
 # colony disease fate
 set.seed(10)
 adonis2(formula = ps.prok.euc_diss ~ Fate_after_SP1, data = ps.prok.clr_meta, permutations = 999) 
+```
 
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Fate_after_SP1, data = ps.prok.clr_meta, permutations = 999)
+##          Df SumOfSqs      R2      F Pr(>F)  
+## Model     3  1408420 0.12674 1.7899  0.015 *
+## Residual 37  9704536 0.87326                
+## Total    40 11112957 1.00000                
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+```
+
+``` r
 # zoox (symbiont) composition
 set.seed(10)
 adonis2(formula = ps.prok.euc_diss ~ Zoox_composition_New, data = ps.prok.clr_meta, permutations = 999) 
+```
 
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Zoox_composition_New, data = ps.prok.clr_meta, permutations = 999)
+##          Df SumOfSqs      R2     F Pr(>F)    
+## Model     5  3645288 0.32802 3.417  0.001 ***
+## Residual 35  7467669 0.67198                 
+## Total    40 11112957 1.00000                 
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+```
+
+``` r
 # disease at sampling
 set.seed(10)
 adonis2(formula = ps.prok.euc_diss ~ Condition_At_Sampling, data = ps.prok.clr_meta, permutations = 999) 
+```
 
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Condition_At_Sampling, data = ps.prok.clr_meta, permutations = 999)
+##          Df SumOfSqs      R2     F Pr(>F)   
+## Model     1   881726 0.07934 3.361  0.002 **
+## Residual 39 10231231 0.92066                
+## Total    40 11112957 1.00000                
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+```
+
+``` r
 # clone
 set.seed(10)
 adonis2(formula = ps.prok.euc_diss ~ Clone, data = ps.prok.clr_meta, permutations = 999) 
+```
 
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Clone, data = ps.prok.clr_meta, permutations = 999)
+##          Df SumOfSqs      R2      F Pr(>F)
+## Model     4  1297046 0.11671 1.1892  0.187
+## Residual 36  9815911 0.88329              
+## Total    40 11112957 1.00000
+```
+
+``` r
 # reef location
 set.seed(10)
 adonis2(formula = ps.prok.euc_diss ~ Location, data = ps.prok.clr_meta, permutations = 999) 
+```
 
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Location, data = ps.prok.clr_meta, permutations = 999)
+##          Df SumOfSqs      R2      F Pr(>F)
+## Model     1   311483 0.02803 1.1246  0.288
+## Residual 39 10801474 0.97197              
+## Total    40 11112957 1.00000
+```
+
+``` r
 # Do the adonis2 using strata to control for symbiodiniaceae composition since I am interested in controlling for this effect. I am most interested in disease, but with symbiont composition controlling a huge portion of the community, it is difficult to disentangle
 # Code for this found at https://github.com/vegandevs/vegan/discussions/600 
 set.seed(10)
 stratatest <- with(ps.prok.clr_meta, how(nperm = 999, blocks = Zoox_composition_New))
 adonis2(ps.prok.euc_diss ~ Condition_At_Sampling, data = ps.prok.clr_meta, permutations = stratatest) 
+```
 
+```
+## Permutation test for adonis under reduced model
+## Blocks:  Zoox_composition_New 
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Condition_At_Sampling, data = ps.prok.clr_meta, permutations = stratatest)
+##          Df SumOfSqs      R2     F Pr(>F)  
+## Model     1   881726 0.07934 3.361   0.03 *
+## Residual 39 10231231 0.92066               
+## Total    40 11112957 1.00000               
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+```
+
+``` r
 # fate while controlling for symbiont composition
 set.seed(10)
 stratatest <- with(ps.prok.clr_meta, how(nperm = 999, blocks = Zoox_composition_New))
 adonis2(ps.prok.euc_diss ~ Fate_after_SP1, data = ps.prok.clr_meta, permutations = stratatest) 
+```
+
+```
+## Permutation test for adonis under reduced model
+## Blocks:  Zoox_composition_New 
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Fate_after_SP1, data = ps.prok.clr_meta, permutations = stratatest)
+##          Df SumOfSqs      R2      F Pr(>F)   
+## Model     3  1408420 0.12674 1.7899  0.005 **
+## Residual 37  9704536 0.87326                 
+## Total    40 11112957 1.00000                 
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ```
