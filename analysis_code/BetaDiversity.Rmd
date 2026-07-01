@@ -35,6 +35,8 @@ theme_set(theme_bw())
 library(ggpubr)
 library(devtools)
 library(pairwiseAdonis)
+library(microViz)
+library(patchwork) # for arranging groups of plots
 ```
 
 
@@ -275,12 +277,12 @@ betadisp_symbiont <- ggplot(disp.symbiont.meta.no3421or689, aes(x = Zoox_composi
 ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("d.", "e."), common.legend = TRUE, legend = "right")
 ```
 
-# Figure S2 - Clone and Location
+L# Figure S2 - Clone and Location
 
 ```{r clone_location}
 # Clone PCA
 clone_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                color="Clone", shape = "Condition_At_Sampling") +
+                color="Fate_after_SP1", shape = "Condition_At_Sampling") +
   coord_fixed() +
   geom_point(size = 4) +
   facet_wrap(. ~ Clone) +
@@ -298,6 +300,8 @@ location_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples",
 
 ggarrange(clone_pca, location_pca, labels = c("a.", "b."), widths = c(2,1))
 ```
+Based on this analysis, underlying clone does not significantly influence the microbiome. However, one challenge is that non-independence of individuals is technically violated and can influence my n because some of these individuals are technically genetically identical. I would like to do tests that control for the clone set before ignoring it completely. 
+
 
 # Figure S4 - Will be diseased analysis
 
@@ -375,3 +379,150 @@ set.seed(10)
 stratatest <- with(ps.prok.clr_meta, how(nperm = 999, blocks = Zoox_composition_New))
 adonis2(ps.prok.euc_diss ~ Fate_after_SP1, data = ps.prok.clr_meta, permutations = stratatest) 
 ```
+
+## controlling for clone non-independence - Supplementary Results
+```{r}
+# 1. Create a strict permutation design using "Clone" (reflects groups for which there are unique clones or not) as a blocking mechanism
+# This tells R that permutations can ONLY happen within each clone lineage,
+# effectively controlling for genetic background before testing a given parameter of interest
+perm_design_clone <- with(ps.prok.clr_meta, how(nperm = 999, blocks = Clone))
+
+# Conduct PERMANOVA stats tests while controlling for the impact of clone to control for the clone non-independence. 
+
+# colony disease fate
+set.seed(10)
+adonis2(formula = ps.prok.euc_diss ~ Fate_after_SP1, 
+        data = ps.prok.clr_meta, 
+        permutations = perm_design_clone) 
+
+# zoox (symbiont) composition
+set.seed(10)
+adonis2(formula = ps.prok.euc_diss ~ Zoox_composition_New, 
+        data = ps.prok.clr_meta, 
+        permutations = perm_design_clone) 
+
+# disease condition at sampling
+set.seed(10)
+adonis2(formula = ps.prok.euc_diss ~ Condition_At_Sampling, 
+        data = ps.prok.clr_meta, 
+        permutations = perm_design_clone) 
+
+# reef location
+set.seed(10)
+adonis2(formula = ps.prok.euc_diss ~ Location, 
+        data = ps.prok.clr_meta, 
+        permutations = perm_design_clone) 
+```
+
+# Taxonomy 
+
+We are interested in the overall taxonomic assignments of the different contigs in our dataset. 
+
+```{r}
+# Load table with count abundances from salmon ("numreads")
+prokreads <- read.table("../data/FLK_OFAV_MG_prok_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
+prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
+
+# Load metadata - Use updated metadata (v10 with new symbiont and treatment categories)
+metadata <- as.data.frame(read_excel("../data/FLK_OFAV_MG_prok_coassembly_metadata_RRC_v10.xlsx", na = "NA"))
+rownames(metadata) <- metadata$CoralID
+
+# remove genes are zero across all samples? Like 32k 
+prokreads_nozero <- prokreads[rowSums(prokreads) != 0, ]
+
+# Fix the sample names because R doesn't like column names that start with a number
+colnames(prokreads_nozero) <- str_replace_all(colnames(prokreads_nozero), pattern = "[X]", "")
+colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
+
+# Read in the taxonomy
+prok_taxa <- read.table("../data/FLK_OFAV_MG_prok_coassembly_tax_mmseqs2.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
+
+## SPLIT APART THE TAXONOMY INFO - I'd like to display the taxonomic information of the organisms in the corals
+prok_taxa.split <- prok_taxa %>%
+  separate(complete_classification, 
+           into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
+           sep = "[;]", remove = FALSE) %>%
+  dplyr::select(contig, Domain:Species, annotation) %>%
+  mutate(across(where(is.character), ~ replace_na(., "unclassified"))) %>%
+  mutate(Domain = str_replace(Domain, "-_root", "d_Unclassified")) %>%
+  mutate(Domain = str_replace(Domain, "unclassified", "d_Unclassified"))
+
+rownames(prok_taxa.split) <- prok_taxa.split$contig
+prok_taxa.split <- prok_taxa.split[,2:9]
+```
+## Create phyloseq object
+```{r}
+## Make phyloseq object of count-related data 
+NUMREADS = otu_table(prokreads_nozero, taxa_are_rows = TRUE)
+META = sample_data(metadata)
+TAX = tax_table(as.matrix(prok_taxa.split))
+
+ps.prok.tax <- phyloseq(NUMREADS, META, TAX)
+ps.prok.tax
+```
+## Create a graph of the taxonomic information across the corals
+```{r}
+# Set levels for all the graphs
+sample_data(ps.prok.tax)$Fate_after_SP1 <- factor(sample_data(ps.prok.tax)$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
+
+
+# Make a graph showing just the top 20 most abundant phyla as there are a TON of phyla
+# a lot of the data is unclassified. Maybe remove that first, but after transforming sample counts so essentially what was removed was unclassified sequences. 
+ps.prok.tax.ra <- ps.prok.tax %>%
+  transform_sample_counts(function(x) x / sum(x)) 
+
+# Print and calculate how much of the total percent of the data is unclassified at the domain level
+unclassified_percentage <- ps.prok.tax.ra %>% 
+  subset_taxa(is.na(Domain) | Domain %in% c("", "d__", "unclassified", "d_Unclassified")) %>% 
+  otu_table() %>% 
+  sum() / nsamples(ps.prok.tax.ra) * 100
+
+cat("Total unclassified data at Domain level:", round(unclassified_percentage, 2), "%\n")
+
+# Remove the unclassified sequences at the Domain level - now down to 60,281 taxa
+ps.prok.tax.clean <- subset_taxa(ps.prok.tax, 
+  !is.na(Domain) & 
+  !(Domain %in% c("", "d__", "unclassified", "d_Unclassified"))
+)
+ps.prok.tax.clean
+
+# How many total taxa in class?
+tax_table(ps.prok.tax)[,3] %>% unique %>% length
+
+phyla <- ps.prok.tax %>% tax_fix(unknowns = c("unclassified"), anon_unique = TRUE) %>%
+  comp_barplot(tax_level = "Class", n_taxa = 20, 
+               facet_by = "Fate_after_SP1", 
+               other_name = "Other Class (n = 152)") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+phyla
+
+#ggsave("../figures/taxonomy_barplot.pdf", width = 10, height = 7)
+
+# Barplot without the unclassified domain-level sequences 
+default_colors <- distinct_palette(n = 21, pal = "brewerPlus", add = NA) # make default palette for comp_barplot, excluding the lightgrey addon
+modified_colors <- default_colors[-1] # remove first color
+final_palette <- c(modified_colors, "lightgrey") # add in light grey for Other group
+
+phyla_nounclass <- ps.prok.tax.clean %>% tax_fix(unknowns = c("unclassified"), anon_unique = TRUE) %>%
+   comp_barplot(tax_level = "Class", n_taxa = 20, 
+                facet_by = "Fate_after_SP1", 
+                palette = final_palette,
+                other_name = "Other Class (n = 151)") +
+   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+phyla_nounclass
+#ggsave("../figures/taxonomy_barplot_NoUnclassified.pdf", width = 10, height = 7)
+
+# Check out the percentage of reads unclassified at the domain level (fully unclassified)
+otu_domain <- ps.prok.tax.ra %>% tax_glom(taxrank = "Domain") %>%
+  otu_table()
+
+tax_domain <- ps.prok.tax.ra %>% tax_glom(taxrank = "Domain") %>%
+  tax_table()
+
+tax_domain # k127_1676892_1 represents the unclassified taxa
+t(otu_domain["k127_1676892_1",]) %>% as.data.frame %>% summary
+
+wrap_plots(phyla, phyla_nounclass, nrow = 2)
+ggsave("../figures/taxonomy_barplot_Phylum.pdf", height = 14, width = 10)
+```
+The taxonomic abundance information was conducted on contigs and their abundance is from mapping back to the co-assembly. These are the same contigs for which we have functional information. This generally demonstrates how much of the taxonomic information is unclassified. For taxa unclassified fully at the domain level, it represented 79.68% of sequences per sample, on average, with a range of 53.7% (sample N60) to 93.7% (sample 663)
