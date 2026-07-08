@@ -6,7 +6,7 @@
 library(phyloseq)
 library(corncob)
 
-# not exactly sure what this does...maybe it saves a log?
+# save version numbers of all packages and software
 writeLines(capture.output(sessionInfo()), "sessionInfo_9.10.24.txt")
 
 # load in the phyloseq object - only annotated genes and their counts across all files
