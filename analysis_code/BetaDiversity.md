@@ -33,6 +33,8 @@ theme_set(theme_bw())
 library(ggpubr)
 library(devtools)
 library(pairwiseAdonis)
+library(microViz)
+library(patchwork) # for arranging groups of plots
 ```
 
 
@@ -103,7 +105,7 @@ ps.prok.euc_diss <- vegdist(ps.prok.clr_otu, method = "euclidean")
 
 
 # Figure 3a-c
-a) Principal components analysis (PCA) of coral tissue prokaryotic functional microbiome beta diversity (Aitchison distance) colored by colony fate with point shape reflecting the condition of the coral at sampling. b) Prokaryotic functional beta diversity dispersion measured as the distance to centroid was greater in colonies with diseased fates relative to recovered or unaffected fates (Wilcoxon rank sum test, p < 0.05).  c) Prokaryotic functional beta diversity dispersion measured as the distance to centroid was greater in actively diseased colonies relative to apparently healthy colonies (Wilcoxon rank sum test, p < 0.05). 
+Functional microbiome composition in Orbicella faveolata is explained by colony fate, coral condition at sampling, and Symbiodiniaceae composition (PERMANOVA, 999 permutations, p < 0.05). a) Principal components analysis (PCA) of coral tissue prokaryotic functional microbiome beta diversity (Aitchison distance) colored by colony fate with point shape reflecting the condition of the coral at sampling. b) Prokaryotic functional beta diversity dispersion measured as the distance to centroid was greater in colonies with diseased fates relative to recovered or unaffected fates (Wilcoxon rank sum test, `*p < 0.05`).  c) Prokaryotic functional beta diversity dispersion measured as the distance to centroid was greater in actively diseased colonies relative to apparently healthy colonies (Wilcoxon rank sum test, `*p < 0.05`). 
 
 ## Figure 3b betadisper fate
 
@@ -284,7 +286,7 @@ ggarrange(fate_pca_final_new, betadisp_fate_new, betadisp_disease_new, labels = 
 <img src="../figures/fig-betadiv-fate-1.png" width="672" />
 
 # Figure 3d-e 
-d) PCA as in (a) colored by Symbiodiniaceae composition. e) Functional prokaryotic beta dispersion differed across Symbiodiniaceae composition groups, with corals containing Breviolum dominant + Cladocopium + Durusdinium exhibiting greater dispersion than Breviolum-only tissues (Tukey Honest Significant Differences post-hoc test, **p < 0.01). Note that the Cladocopium and Durusdinium and the Breviolum and Durusdinium groupings are omitted from panel (d) because there was only one coral in each group. All points are colored by Symbiodiniaceae composition groupings, and shape reflects the colony condition at the time of sampling. The groupings Breviolum and Durusdinium, and Cladocopium and Durusdinium contain both genera making up at least 10% of symbiont community. See Figure S3 in the manuscript for a visualization of the photoendosymbiont composition of all corals.
+d) PCA as in (a) colored by Symbiodiniaceae composition. e) Functional prokaryotic beta dispersion differed across Symbiodiniaceae composition groups, with corals containing Breviolum dominant + Cladocopium + Durusdinium exhibiting greater dispersion than Breviolum-only tissues (Tukey Honest Significant Differences post-hoc test, `**p < 0.01`). Note that the Cladocopium and Durusdinium and the Breviolum and Durusdinium groupings are omitted from panel (d) because there was only one coral in each group. All points are colored by Symbiodiniaceae composition groupings, and shape reflects the colony condition at the time of sampling. The groupings Breviolum and Durusdinium, and Cladocopium and Durusdinium contain both genera making up at least 10% of symbiont community. See Figure S3 for a visualization of the photoendosymbiont composition of all corals. 
 
 ## Figure 3d - PCA zoox
 
@@ -442,11 +444,13 @@ ggarrange(symbiont_pca_final, betadisp_symbiont, labels = c("d.", "e."), common.
 
 # Figure S2 - Clone and Location
 
+Coral genotype (defined in Klein et al. (2024)) and reef location did not explain coral prokaryotic functional microbiome beta diversity (PERMANOVA, p > 0.05). a) Principal components analysis of coral prokaryotic functional microbiome beta diversity (Aitchison distance) colored by like colony genotypes, except in the case of “no clone”, where colonies are all distinct genotypes. The genotype letters are arbitrary. The colony ID’s are labeled in panels a-d for ease of comparison across other graphs and tables. The lack of tight clustering between genotypes led us to treat genotypes as individuals (not combine the data). b) Principal components analysis as in (a) except with points colored by the reef from which the coral originated (either Looe or Sand Key) in the lower Florida Keys. The shapes in both panels represent the presence of disease on the colony at the time of sampling.
+
 
 ``` r
 # Clone PCA
 clone_pca <- plot_ordination(ps.prok_clr, ps.prok_clr_euc, type="samples", 
-                color="Clone", shape = "Condition_At_Sampling") +
+                color="Fate_after_SP1", shape = "Condition_At_Sampling") +
   coord_fixed() +
   geom_point(size = 4) +
   facet_wrap(. ~ Clone) +
@@ -471,12 +475,16 @@ ggarrange(clone_pca, location_pca, labels = c("a.", "b."), widths = c(2,1))
 ```
 
 <img src="../figures/fig-betadiv-clone_location-1.png" width="672" />
+Based on this analysis, underlying clone does not significantly influence the microbiome. However, one challenge is that non-independence of individuals is technically violated and can influence my n because some of these individuals are technically genetically identical. I would like to do tests that control for the clone set before ignoring it completely. 
 
-# Figure S4 - Will be diseased analysis
+
+# Figure S5 - Will be diseased analysis
 
 I noticed that the Will be diseased category is not significantly different in microbial dispersion compared to the diseased category. We are interested in understanding if this has anything to do with the months until disease onset for these "Will be diseased" corals. I will check out my figures because I think I looked into this at some point. The valuable column here is "Months_after_sampling_when_observed_diseased".
 I will do a regression. Essentially, I'd predict that when disease is coming soon, the dispersion will be higher (more dysbiotic).
 I also think history will matter. Some of the "Will be diseased" corals had previous history of disease, but were unaffected at sampling and got diseased again in the future, while other "Will be diseased" corals had no history of disease, but still got diseaed. 
+
+Figure legend: Coral functional microbial beta diversity dispersion in “will be diseased” colonies is not influenced by future onset or past history of disease (linear regression (a) p > 0.05, Wilcox test (b) p > 0.05). a) Linear regression between the number of months following sampling that disease was observed in colonies that were apparently healthy at sampling (“Will be diseased” fate). b) Box and whisker plot comparing history of disease between colonies of “will be diseased” fate. Diseased colonies are also the only colonies that received antibiotic treatment between 12-27 months prior to sampling. “No data” colonies can be presumed to be apparently healthy with no history of antibiotic treatment as monitoring was prevalent on reefs, but only diseased colonies were tagged and treated prior to sampling. 
 
 
 ``` r
@@ -702,3 +710,279 @@ adonis2(ps.prok.euc_diss ~ Fate_after_SP1, data = ps.prok.clr_meta, permutations
 ## ---
 ## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
 ```
+
+## Table S4 - Clone non-independence PERMANOVA
+
+``` r
+# 1. Create a strict permutation design using "Clone" (reflects groups for which there are unique clones or not) as a blocking mechanism
+# This tells R that permutations can ONLY happen within each clone lineage,
+# effectively controlling for genetic background before testing a given parameter of interest
+perm_design_clone <- with(ps.prok.clr_meta, how(nperm = 999, blocks = Clone))
+
+# Conduct PERMANOVA stats tests while controlling for the impact of clone to control for the clone non-independence. 
+
+# colony disease fate
+set.seed(10)
+adonis2(formula = ps.prok.euc_diss ~ Fate_after_SP1, 
+        data = ps.prok.clr_meta, 
+        permutations = perm_design_clone) 
+```
+
+```
+## Permutation test for adonis under reduced model
+## Blocks:  Clone 
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Fate_after_SP1, data = ps.prok.clr_meta, permutations = perm_design_clone)
+##          Df SumOfSqs      R2      F Pr(>F)   
+## Model     3  1408420 0.12674 1.7899  0.002 **
+## Residual 37  9704536 0.87326                 
+## Total    40 11112957 1.00000                 
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+```
+
+``` r
+# zoox (symbiont) composition
+set.seed(10)
+adonis2(formula = ps.prok.euc_diss ~ Zoox_composition_New, 
+        data = ps.prok.clr_meta, 
+        permutations = perm_design_clone) 
+```
+
+```
+## Permutation test for adonis under reduced model
+## Blocks:  Clone 
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Zoox_composition_New, data = ps.prok.clr_meta, permutations = perm_design_clone)
+##          Df SumOfSqs      R2     F Pr(>F)    
+## Model     5  3645288 0.32802 3.417  0.001 ***
+## Residual 35  7467669 0.67198                 
+## Total    40 11112957 1.00000                 
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+```
+
+``` r
+# disease condition at sampling
+set.seed(10)
+adonis2(formula = ps.prok.euc_diss ~ Condition_At_Sampling, 
+        data = ps.prok.clr_meta, 
+        permutations = perm_design_clone) 
+```
+
+```
+## Permutation test for adonis under reduced model
+## Blocks:  Clone 
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Condition_At_Sampling, data = ps.prok.clr_meta, permutations = perm_design_clone)
+##          Df SumOfSqs      R2     F Pr(>F)    
+## Model     1   881726 0.07934 3.361  0.001 ***
+## Residual 39 10231231 0.92066                 
+## Total    40 11112957 1.00000                 
+## ---
+## Signif. codes:  0 '***' 0.001 '**' 0.01 '*' 0.05 '.' 0.1 ' ' 1
+```
+
+``` r
+# reef location
+set.seed(10)
+adonis2(formula = ps.prok.euc_diss ~ Location, 
+        data = ps.prok.clr_meta, 
+        permutations = perm_design_clone) 
+```
+
+```
+## Permutation test for adonis under reduced model
+## Blocks:  Clone 
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.prok.euc_diss ~ Location, data = ps.prok.clr_meta, permutations = perm_design_clone)
+##          Df SumOfSqs      R2      F Pr(>F)
+## Model     1   311483 0.02803 1.1246  0.403
+## Residual 39 10801474 0.97197              
+## Total    40 11112957 1.00000
+```
+
+# Figure S4 
+
+The coral taxonomic microbiome was largely unclassified at the domain level. a.) Unclassified sequences comprised 53% to 93% of the microbiome, with an average of 79.7%. Relative abundances for the top 20 most abundant classes are displayed, with the remaining 152 class-level annotations aggregated into the “Other” category. b.) The relative abundance of all bacterial and archaeal sequences with a classification at least to domain level, displayed to class level (when possible) for the top 20 groups. The coral samples are split up into their fate category and labeled by unique sample ID (x-axis). Taxonomy was identified in the prokaryotic coassembly using the GTDB database and abundances were calculated with salmon (See SI Methods).
+
+
+``` r
+# Load table with count abundances from salmon ("numreads")
+prokreads <- read.table("../data/FLK_OFAV_MG_prok_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
+prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
+
+# Load metadata - Use updated metadata (v10 with new symbiont and treatment categories)
+metadata <- as.data.frame(read_excel("../data/FLK_OFAV_MG_prok_coassembly_metadata_RRC_v10.xlsx", na = "NA"))
+rownames(metadata) <- metadata$CoralID
+
+# remove genes are zero across all samples? Like 32k 
+prokreads_nozero <- prokreads[rowSums(prokreads) != 0, ]
+
+# Fix the sample names because R doesn't like column names that start with a number
+colnames(prokreads_nozero) <- str_replace_all(colnames(prokreads_nozero), pattern = "[X]", "")
+colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
+
+# Read in the taxonomy
+prok_taxa <- read.table("../data/FLK_OFAV_MG_prok_coassembly_tax_mmseqs2.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
+
+## SPLIT APART THE TAXONOMY INFO - I'd like to display the taxonomic information of the organisms in the corals
+prok_taxa.split <- prok_taxa %>%
+  separate(complete_classification, 
+           into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
+           sep = "[;]", remove = FALSE) %>%
+  dplyr::select(contig, Domain:Species, annotation) %>%
+  mutate(across(where(is.character), ~ replace_na(., "unclassified"))) %>%
+  mutate(Domain = str_replace(Domain, "-_root", "d_Unclassified")) %>%
+  mutate(Domain = str_replace(Domain, "unclassified", "d_Unclassified"))
+```
+
+```
+## Warning: Expected 7 pieces. Missing pieces filled with `NA` in 21018 rows [12, 26, 30,
+## 35, 36, 37, 41, 82, 84, 108, 128, 134, 137, 139, 140, 153, 171, 187, 200, 204,
+## ...].
+```
+
+``` r
+rownames(prok_taxa.split) <- prok_taxa.split$contig
+prok_taxa.split <- prok_taxa.split[,2:9]
+```
+
+
+
+Create phyloseq object
+
+``` r
+## Make phyloseq object of count-related data 
+NUMREADS = otu_table(prokreads_nozero, taxa_are_rows = TRUE)
+META = sample_data(metadata)
+TAX = tax_table(as.matrix(prok_taxa.split))
+
+ps.prok.tax <- phyloseq(NUMREADS, META, TAX)
+```
+
+## Figure S4 - Taxonomy
+
+``` r
+# Set levels for all the graphs
+sample_data(ps.prok.tax)$Fate_after_SP1 <- factor(sample_data(ps.prok.tax)$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
+
+
+# Make a graph showing just the top 20 most abundant phyla as there are a TON of phyla
+# a lot of the data is unclassified. Maybe remove that first, but after transforming sample counts so essentially what was removed was unclassified sequences. 
+ps.prok.tax.ra <- ps.prok.tax %>%
+  transform_sample_counts(function(x) x / sum(x)) 
+
+# Print and calculate how much of the total percent of the data is unclassified at the domain level
+unclassified_percentage <- ps.prok.tax.ra %>% 
+  subset_taxa(is.na(Domain) | Domain %in% c("", "d__", "unclassified", "d_Unclassified")) %>% 
+  otu_table() %>% 
+  sum() / nsamples(ps.prok.tax.ra) * 100
+
+cat("Total unclassified data at Domain level:", round(unclassified_percentage, 2), "%\n")
+```
+
+```
+## Total unclassified data at Domain level: 79.68 %
+```
+
+``` r
+# Remove the unclassified sequences at the Domain level - now down to 60,281 taxa
+ps.prok.tax.clean <- subset_taxa(ps.prok.tax, 
+  !is.na(Domain) & 
+  !(Domain %in% c("", "d__", "unclassified", "d_Unclassified"))
+)
+#ps.prok.tax.clean
+
+# How many total taxa in class?
+tax_table(ps.prok.tax)[,3] %>% unique %>% length
+```
+
+```
+## [1] 172
+```
+
+``` r
+phyla <- ps.prok.tax %>% tax_fix(unknowns = c("unclassified"), anon_unique = TRUE) %>%
+  comp_barplot(tax_level = "Class", n_taxa = 20, 
+               facet_by = "Fate_after_SP1", 
+               other_name = "Other Class (n = 152)") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+```
+## Registered S3 method overwritten by 'seriation':
+##   method         from 
+##   reorder.hclust vegan
+```
+
+``` r
+#phyla
+
+#ggsave("../figures/taxonomy_barplot.pdf", width = 10, height = 7)
+
+# Barplot without the unclassified domain-level sequences 
+default_colors <- distinct_palette(n = 21, pal = "brewerPlus", add = NA) # make default palette for comp_barplot, excluding the lightgrey addon
+modified_colors <- default_colors[-1] # remove first color
+final_palette <- c(modified_colors, "lightgrey") # add in light grey for Other group
+
+phyla_nounclass <- ps.prok.tax.clean %>% tax_fix(unknowns = c("unclassified"), anon_unique = TRUE) %>%
+   comp_barplot(tax_level = "Class", n_taxa = 20, 
+                facet_by = "Fate_after_SP1", 
+                palette = final_palette,
+                other_name = "Other Class (n = 151)") +
+   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+#phyla_nounclass
+#ggsave("../figures/taxonomy_barplot_NoUnclassified.pdf", width = 10, height = 7)
+
+# Check out the percentage of reads unclassified at the domain level (fully unclassified)
+otu_domain <- ps.prok.tax.ra %>% tax_glom(taxrank = "Domain") %>%
+  otu_table()
+
+tax_domain <- ps.prok.tax.ra %>% tax_glom(taxrank = "Domain") %>%
+  tax_table()
+
+tax_domain # k127_1676892_1 represents the unclassified taxa
+```
+
+```
+## Taxonomy Table:     [3 taxa by 8 taxonomic ranks]:
+##                Domain           Phylum Class Order Family Genus Species
+## k127_101325_1  "d_Bacteria"     NA     NA    NA    NA     NA    NA     
+## k127_1676892_1 "d_Unclassified" NA     NA    NA    NA     NA    NA     
+## k127_3194631_1 "d_Archaea"      NA     NA    NA    NA     NA    NA     
+##                annotation
+## k127_101325_1  NA        
+## k127_1676892_1 NA        
+## k127_3194631_1 NA
+```
+
+``` r
+t(otu_domain["k127_1676892_1",]) %>% as.data.frame %>% summary
+```
+
+```
+##  k127_1676892_1  
+##  Min.   :0.5373  
+##  1st Qu.:0.7780  
+##  Median :0.8138  
+##  Mean   :0.7968  
+##  3rd Qu.:0.8323  
+##  Max.   :0.9372
+```
+
+``` r
+wrap_plots(phyla, phyla_nounclass, nrow = 2)
+```
+
+<img src="../figures/fig-betadiv-taxonomy-1.png" width="672" />
+
+The taxonomic abundance information was conducted on contigs and their abundance is from mapping back to the co-assembly. These are the same contigs for which we have functional information. This generally demonstrates how much of the taxonomic information is unclassified. For taxa unclassified fully at the domain level, it represented 79.68% of sequences per sample, on average, with a range of 53.7% (sample N60) to 93.7% (sample 663)
