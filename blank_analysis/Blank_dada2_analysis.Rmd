@@ -1,11 +1,19 @@
 ---
-title: "Blank_analysis"
-output: html_document
-date: "2025-01-16"
+title: "Blank analysis"
+author: "Cynthia Becker"
+date: "2026-07-11"
+output:
+  html_document:
+    keep_md: true
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    theme: united
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, fig.retina = 2, fig.path = "../figures/fig-Blank")
+setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
 ```
 
 ## Microbiome blank analysis
@@ -33,7 +41,7 @@ library(microViz)
 ```
 
 ## data
-```{r}
+```{r include=FALSE}
 path <- "/Users/cynthiabecker/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/blank_analysis/cutadapt"
 list.files(path)
 ```
@@ -72,7 +80,7 @@ names(filtRs) <- sample.names
 ```
 
 Use stansdard filtering parameters along with the truncation lengths indicated from the quality profiles. 
-```{r}
+```{r results='hide'}
 out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncLen=c(145,145),
               maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
               compress=TRUE, multithread=TRUE)
@@ -103,7 +111,7 @@ The error rates for each possible transition (A→C, A→G, …) are shown. Poin
 
 Time to apply the core sample inference model to the filtered and trimmed data
 
-```{r}
+```{r results='hide'}
 dadaFs <- dada(filtFs, err=errF, multithread=TRUE)
 dadaRs <- dada(filtRs, err=errR, multithread=TRUE)
 
@@ -113,7 +121,7 @@ dadaFs[[1]]
 For the first sample, it found 110 sequence variants in the data. 
 
 # Merge paired reads
-```{r}
+```{r results='hide'}
 mergers <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE)
 # Inspect the merger data.frame from the first sample
 head(mergers[[1]])
@@ -148,10 +156,13 @@ track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(mergers, 
 # If processing a single sample, remove the sapply calls: e.g. replace sapply(dadaFs, getN) with getN(dadaFs)
 colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
 rownames(track) <- sample.names
-head(track)
+
+track %>%
+  kbl() %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"))
 
 # Save this table! It is useful to have
-write.table(track, "blank_reads_through_pipeline.csv", sep = ",", row.names = TRUE, col.names = TRUE)
+#write.table(track, "blank_reads_through_pipeline.csv", sep = ",", row.names = TRUE, col.names = TRUE)
 ```
 
 
@@ -204,8 +215,6 @@ write.table(taxonomy, file = "taxonomy_Blank_RRC.txt", sep = "\t", row.names = T
 write.table(ASVseqs, file = "ASVsequences_Blank_RRC.txt", sep = "\t", row.names = TRUE, col.names = TRUE)
 ```
 
-Interesting...I don't know acetobacter well. It seems common here in the results though.
-
 # Phyloseq preliminary analysis
 I would like to use phyloseq to investigate the composition of different taxonomic groups in the blanks. Questions I have are:
 - What taxonomic groupings are common in the blanks?
@@ -247,275 +256,18 @@ top20 <- names(sort(taxa_sums(ps), decreasing=TRUE))[1:20]
 ps.top20 <- transform_sample_counts(ps, function(OTU) OTU/sum(OTU))
 ps.top20 <- prune_taxa(top20, ps.top20)
 
-plot_bar(ps.top20, fill="Family")
 plot_bar(ps.top20, fill="Genus")
 
 ggsave("results/top_20_blank_ASVs.pdf")
 ```
-Next let's visualize all the taxa
-```{r}
-ps.ra <- transform_sample_counts(ps, function(OTU) OTU/sum(OTU))
-
-plot_bar(ps.ra, fill="Family")
-```
-
-Okay, so it looks like a lot of different taxa showed up. Take a quick look using raw counts. I suspect the EC3 and EC4 samples will have MUCH more taxa. 
-```{r}
-plot_bar(ps, fill = "Family")
-
-plot_bar(ps, fill = "Genus")
-```
-# Prevalent contaminants
-
-Which Families are in all 4 of the samples?
-```{r}
-ps.family <- tax_glom(ps, taxrank = "Family")
-
-# Define core contaminants as taxa that show up with a positive abundance in all four samples
-ps.corecontam <- filter_taxa(ps.family, function(x) sum(x > 0) == 4, TRUE)
-
-plot_bar(ps.corecontam, fill = "Family")
-```
-Which ASVs are in all 4 of the samples?
-```{r}
-# Define core contaminants as taxa that show up with a positive abundance in at least 3 samples
-ps.corecontam.asv <- filter_taxa(ps, function(x) sum(x > 0) >= 3, TRUE)
-ps.corecontam.asv
-
-plot_bar(ps.corecontam.asv, fill = "Genus")
-```
-Which genera are in at least 3 controls?
-```{r}
-ps.genus <- tax_glom(ps, taxrank = "Genus")
-
-# Define core contaminants as taxa that show up with a positive abundance in at least 3 samples
-ps.corecontam.genus <- filter_taxa(ps.genus, function(x) sum(x > 0) >= 3, TRUE)
-ps.corecontam.genus
-
-plot_bar(ps.corecontam.genus, fill = "Genus")
-```
-# MAG taxa to blanks
-
-Let's look at the different ASVs that fall into this. Keep in mind, the MAGs I recovered (indicating lots of coverage of these genera) in the metagenome coassembly for FL Keys corals were:
-d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Burkholderiales;f__Burkholderiaceae_B;g__Pelomonas;s__
-d__Bacteria;p__Actinomycetota;c__Actinomycetia;o__Mycobacteriales;f__Mycobacteriaceae;g__Lawsonella;s__Lawsonella clevelandensis_A
-d__Bacteria;p__Actinomycetota;c__Actinomycetia;o__Propionibacteriales;f__Propionibacteriaceae;g__Cutibacterium;s__Cutibacterium namnetense
-d__Bacteria;p__Actinomycetota;c__Actinomycetia;o__Propionibacteriales;f__Propionibacteriaceae;g__Cutibacterium;s__Cutibacterium acnes
-d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;f__Lactobacillaceae;g__Schleiferilactobacillus;s__Schleiferilactobacillus harbinensis
-d__Bacteria;p__Bacillota_A;c__Clostridia;o__Peptostreptococcales;f__Caminicellaceae;g__JAKSBP01;s__JAKSBP01 sp022361035
-d__Bacteria;p__Pseudomonadota;c__Alphaproteobacteria;o__Acetobacterales;f__Acetobacteraceae;g__Acetobacter;s__
-d__Bacteria;p__Bacillota;c__Bacilli;o__Lactobacillales;f__Streptococcaceae;g__Streptococcus;s__
-d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Xanthomonadales;f__Xanthomonadaceae;g__Xanthomonas_B;s__Xanthomonas_B massiliensis
-
-Families to looks for:
-* Burkholderiaceae
-* Mycobacteriaceae
-* Propionibacteriaceae
-* Lactobacillaceae
-* Caminicellaceae
-* Acetobacteraceae
-* Streptococcaceae
-* Xanthomonadaceae
-
-Genera to look for:
-* Pelomonas
-* Lawsonella
-* Cutibacterium
-* Schleiferilactobacillus
-* JAKSBP01 (Clostridia)
-* Acetobacter
-* Streptococcus
-* Xanthomonas
-
-Next step...Look for and plot these specific families and genera
-```{r}
-ps.MAG.familes <- subset_taxa(ps, Family=="Burkholderiaceae" | Family=="Mycobacteriaceae" | Family=="Propionibacteriaceae" | Family=="Lactobacillaceae" | Family=="Caminicellaceae" | Family=="Acetobacteraceae" | Family=="Streptococcaceae" | Family=="Xanthomonadaceae")
-
-plot_bar(ps.MAG.familes, fill = "Genus")
-plot_bar(ps.MAG.familes, fill = "Family")
-
-tax_table(ps.MAG.familes)
-```
-
-Next step...Look for and plot these specific Genera
-```{r}
-ps.MAG.genera <- subset_taxa(ps, Genus=="Pelomonas" | Genus=="Lawsonella" | Genus=="Cutibacterium" | Genus=="Schleiferilactobacillus" | Genus=="JAKSBP01" | Genus=="Acetobacter" | Genus=="Streptococcus" | Genus=="Xanthomonas")
-
-plot_bar(ps.MAG.genera, fill = "Genus")
-plot_bar(ps.MAG.genera, fill = "Family")
-
-tax_table(ps.MAG.genera)
-```
-
-What if the 16S primers just don't do a good job amplifying the pelomonas, lawsonella, and cutibacterium? THe ones the MAGs generated?
-I downloaded from silva the analysis of the 515FY and 806RB primers and how well they would match (or not) various taxa within the SILVA datbase. It is called `515FY_806RB_tax_matches_SILVA.csv` and it is at the following path: `/Users/cynthiabecker/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/data`. 
-
-Looks like it is mostly a mismatch for Cutibacterium. But it is a match for some propionibacteriaceae
-Looks like it is a good match for Burkholderiaceae (Pelomonas isn't in the DB)
-Looks like it is an ok match for Lawsonella (half match, half mismatch). ANd it is a good match for most Mycobacteriales. 
-Looks like it is a great match for streptococcus. 
-
-# Relate metagenome taxa to blanks
-Rather than reading in all the taxa, I will just read in the phyloseq object of the count data. 
-```{r}
-# Load table with count abundances from salmon ("numreads")
-prokreads <- read.table("../data/prok_FLK_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
-prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
-
-# how many genes are zero across all samples? Like 32k
-table(rowSums(prokreads) == 0)
-
-# remove them
-prokreads_nozero <- prokreads[rowSums(prokreads) != 0, ]
-dim(prokreads_nozero)
-
-# any samples with no reads? No.
-table(colSums(prokreads_nozero) == 0)
-
-# Fix the sample names bc R doesn't like column names that start with a number
-colnames(prokreads_nozero) <- str_replace_all(colnames(prokreads_nozero), pattern = "[X]", "")
-colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
-
-# Read in the taxonomy
-prok_taxa <- read.table("../data/FLK_prok_coassembly_tax_mmseqs2.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
-
-prok_taxa <- prok_taxa %>% 
-  separate(complete_classification, 
-           into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
-           sep = "[;]", remove = FALSE) %>%
-  dplyr::select(Domain:Species, contig) %>%
-  as.data.frame()
-
-rownames(prok_taxa) <- prok_taxa$contig
-prok_taxa_matrix <- as.matrix(prok_taxa)
-```
-
-Make phyloseq object
-```{r}
-ps.mg <- phyloseq(otu_table(prokreads_nozero, taxa_are_rows=TRUE), 
-               tax_table(prok_taxa_matrix))
-ps.mg
-```
-
-# MG Taxa 
-What are the most abundant taxa from the metagenomic analysis?
-```{r}
-ps.mg.family <- tax_glom(ps.mg, taxrank = "Family")
-ps.mg.family.ra <- transform_sample_counts(ps.mg.family, function(OTU) OTU/sum(OTU))
-
-# how many families total? 777
-length(unique(tax_table(ps.mg.family)[,"Family"]))
-
-ps.mg.family.ra %>% comp_barplot(tax_level = "Family", n_taxa = 15, other_name = "Other Families (n = 762)") +
-  coord_flip()
-```
-What about the top most abundant genera?
-```{r}
-ps.mg.genus <- tax_glom(ps.mg, taxrank = "Genus")
-
-# how many genera? 1747
-ps.mg.genus
-
-comp_barplot(ps.mg.genus, tax_level="Genus", n_taxa = 15, other_name = "Other Genera (n = 1,732)") +
-  coord_flip()
-
-
-```
-
-Ugh....I'm REAAALLLY not sure how to proceed. It is clear that we have these 4 blanks, and they have varying degrees of contaminants.
-
-
-# OPTIONS
-
-## Cutibacterium
-
-Remove cutibacterium. It isn't associated with the environemtn. It is a human skin contaminant. It doesn't show up in the blanks, because it likely isn't amplified well by the 515FY/806RB primers. Let's see. How many genes would it remove if I get rid of Cutibacterium-annotated contigs from my dataset?
-
-```{r}
-ps.mg
-
-# NOTE - subset_taxa will also remove NA's, so make sure to keep the NA's 
-ps.mg.Cuti_remove <- subset_taxa(ps.mg, Genus != "g_Cutibacterium" | is.na(Genus))
-
-ps.mg.Cuti_remove
-
-Cuti <- subset_taxa(ps.mg, Genus == "g_Cutibacterium")
-Cuti
-```
-## Top 20 contaminants
-
-Remove any genera that match the genera of the top 20 ASVs found in blank samples. Get a list of these genera first. 
-```{r}
-ps.mg
-
-tax_table(ps.top20)[ ,"Genus"] %>% unique
-
-subset_taxa(ps.mg, Genus == "g_Acetobacter") # 4408
-subset_taxa(ps.mg, Genus == "g_Schleiferilactobacillus") # 2698
-# NONE subset_taxa(ps.mg, Genus == "g_SN8")
-# NONE subset_taxa(ps.mg, Genus == "g_Brucella")
-subset_taxa(ps.mg, Genus == "g_Liquorilactobacillus") # 397
-# NONE subset_taxa(ps.mg, Genus == "g_Peribacillus")
-subset_taxa(ps.mg, Genus == "g_Lacticaseibacillus") # 304
-subset_taxa(ps.mg, Genus == "g_Novosphingobium") # 1
-subset_taxa(ps.mg, Genus == "g_Lentilactobacillus") # 324
-subset_taxa(ps.mg, Genus == "g_Staphylococcus") # 5345
-# NONE subset_taxa(ps.mg, Genus == "g_Niallia")
-subset_taxa(ps.mg, Genus == "g_Xanthobacter") # 3 
-subset_taxa(ps.mg, Genus == "g_Corynebacterium") # 824
-
-ps.mg.top20_contam_remove <- subset_taxa(ps.mg, 
-                                         Genus != "g_Acetobacter" & 
-                                           Genus != "g_Schleiferilactobacillus" & 
-                                           Genus != "g_Liquorilactobacillus" & 
-                                           Genus != "g_Lacticaseibacillus" &
-                                           Genus != "g_Novosphingobium" &
-                                           Genus != "g_Lentilactobacillus" &
-                                           Genus != "g_Staphylococcus" &
-                                           Genus != "g_Xanthobacter" &
-                                           Genus != "g_Corynebacterium" | is.na(Genus))
-ps.mg.top20_contam_remove
-```
-
-## Highly prevalent contaminants
-
-Remove Genera that were identified in 75% of the blanks (at least 3 of them). I called these prevalent contaminants or "core" contaminants. 
-```{r}
-ps.mg
-
-tax_table(ps.corecontam.genus)[ ,"Genus"] %>% unique
-
-subset_taxa(ps.mg, Genus == "g_Acetobacter") # 4408
-subset_taxa(ps.mg, Genus == "g_Staphylococcus") # 5345
-# NONE subset_taxa(ps.mg, Genus == "g_Niallia")
-subset_taxa(ps.mg, Genus == "g_Xanthobacter") # 3 
-subset_taxa(ps.mg, Genus == "g_Corynebacterium") # 824
-subset_taxa(ps.mg, Genus == "g_Acinetobacter") # 23
-# NONE subset_taxa(ps.mg, Genus == "g_Pleomorphomonas") # 
-# NONE subset_taxa(ps.mg, Genus == "g_Cloacibacterium") # 
-subset_taxa(ps.mg, Genus == "g_Veillonella") # 8
-subset_taxa(ps.mg, Genus == "g_Sphingobium") # 2
-
-
-ps.mg.prev_contam_remove <- subset_taxa(ps.mg, 
-                                         Genus != "g_Acetobacter" & 
-                                           Genus != "g_Staphylococcus" & 
-                                           Genus != "g_Xanthobacter" & 
-                                           Genus != "g_Corynebacterium" &
-                                           Genus != "g_Acinetobacter" &
-                                           Genus != "g_Veillonella" &
-                                           Genus != "g_Sphingobium" | is.na(Genus))
-ps.mg.prev_contam_remove
-```
-
 Save the Taxonomy table and ASV abundance table for the blanks. Also save the phyloseq object. 
 
 ```{r}
-saveRDS(ps, "../data/blank_ps_object.rds")
-
-write.table(as(otu_table(ps), "matrix"),
-            "../data/blank_ASV_abundance.txt", sep="\t", col.names=NA)
-write.table(as(tax_table(ps), "matrix"),
-            "../data/blank_ASV_taxa.txt", sep="\t", col.names=NA)
+# saveRDS(ps, "../data/blank_ps_object.rds")
+# 
+# write.table(as(otu_table(ps), "matrix"),
+#             "../data/blank_ASV_abundance.txt", sep="\t", col.names=NA)
+# write.table(as(tax_table(ps), "matrix"),
+#             "../data/blank_ASV_taxa.txt", sep="\t", col.names=NA)
 ```
 
