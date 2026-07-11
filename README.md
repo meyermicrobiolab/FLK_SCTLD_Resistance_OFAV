@@ -7,9 +7,9 @@ Scripts and R code to reproduce bioinformatics and data analysis workflows for t
 ## Instructions to Reproduce Figures & Analysis
 * Download data files from Zenodo: https://doi.org/10.5281/zenodo.17947166
 * [Figure 3 - Beta diversity analysis.](https://github.com/meyermicrobiolab/FLK_SCTLD_Resistance_OFAV/blob/main/analysis_code/BetaDiversity.md) Code additionally covers content in Figure S2, Figure S4, Figure S5, and Table S4.
-* Figure 4 - Differential abundance analysis. Code additionally covers content in Table S5.
-* Figure 5 - Antibiotic resistance gene analysis. Code additionally covers content in Table S6 and Figure S6.
-* Figure 6 - Biosynthetic gene cluster analysis. Code additionally covers Figure S5
+* [Figure 4 - Differential abundance analysis.](https://github.com/meyermicrobiolab/FLK_SCTLD_Resistance_OFAV/blob/main/analysis_code/Fig3_differential_abundance.md) Code additionally covers content in Table S5.
+* [Figure 5 - Antibiotic resistance gene analysis.](https://github.com/meyermicrobiolab/FLK_SCTLD_Resistance_OFAV/blob/main/analysis_code/AMR_analysis.md) Code additionally covers content in Table S6 and Figure S7.
+* [Figure 6 - Biosynthetic gene cluster analysis.](https://github.com/meyermicrobiolab/FLK_SCTLD_Resistance_OFAV/blob/main/analysis_code/BGC_analysis.md) Code additionally covers Figure S6.
 
 ## Sections
  * **bioinformatics_scripts** - This is a section containing scripts used for generating the coassembly, so that all parameters for programs are accessible.      
