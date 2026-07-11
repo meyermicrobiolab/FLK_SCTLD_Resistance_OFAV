@@ -1,0 +1,1011 @@
+---
+title: "BGC Analysis"
+author: "Cynthia Becker"
+date: "2026-07-11"
+output:
+  html_document:
+    keep_md: true
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    theme: united
+---
+
+
+
+# Setup
+## Install necessary packages
+
+
+``` r
+# For data wrangling
+library(dplyr)
+library(tidyr)
+library(readxl)
+library(stringr)
+library(KEGGREST)
+library(kableExtra)
+
+# For visualization
+library(phyloseq)
+library(randomcoloR)
+library(ggplot2)
+theme_set(theme_bw())
+library(ComplexHeatmap)
+library(pheatmap); packageVersion("pheatmap")
+library(circlize)  # For color scaling
+library(RColorBrewer)
+library(pals)
+library(ggalluvial)
+```
+
+# Read in data
+
+## Load raw data 
+
+First read in the RGI data table. Note, the table that came from the RGI program was kinda tough in the first column. So I changed the first column to have just the contig/gene ID, then got rid of the empty columns (Contig, start, stop, orientation). I also got rid of teh SNPs column and predicted_DNA columns. I also just tried saving it as an Excel document to see if it works better. 
+
+``` r
+bgc <- read_excel("../data/FLK_prok_coassembly_antismash_BGC.xlsx", na = "NA")
+
+antibac <- read.delim("../data/FLK_prok_coassembly_BGC_antimicro_mean.tsv", sep = "\t", row.names = 1)
+
+# Fix the column names to only extract the name of the sample
+colnames(antibac) <- str_split_i(str_split_i(colnames(antibac), "[.]", 3), "_", 1)
+```
+
+Need to read in the count, taxonomy, and metadata data for each gene. 
+
+``` r
+# Load table with count abundances from salmon ("numreads")
+prokreads <- read.table("../data/FLK_OFAV_MG_prok_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
+prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
+
+# Load metadata
+metadata <- as.data.frame(read_excel("../data/FLK_OFAV_MG_prok_coassembly_metadata_RRC_v10.xlsx", na = "NA"))
+rownames(metadata) <- metadata$CoralID
+
+# how many genes are zero across all samples? Like 32k
+table(rowSums(prokreads) == 0)
+```
+
+```
+## 
+##  FALSE   TRUE 
+## 247254  32686
+```
+
+``` r
+# remove them
+prokreads_nozero <- prokreads[rowSums(prokreads) != 0, ]
+dim(prokreads_nozero)
+```
+
+```
+## [1] 247254     41
+```
+
+``` r
+# any samples with no reads? No.
+table(colSums(prokreads_nozero) == 0)
+```
+
+```
+## 
+## FALSE 
+##    41
+```
+
+``` r
+# Fix the sample names bc R doesn't like column names that start with a number
+colnames(prokreads_nozero) <- str_replace_all(colnames(prokreads_nozero), pattern = "[X]", "")
+colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
+
+# Read in the taxonomy
+prok_taxa <- read.table("../data/FLK_OFAV_MG_prok_coassembly_tax_mmseqs2.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
+
+## Subset the metadata
+idx <- match(colnames(prokreads_nozero), rownames(metadata))
+metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced samples
+```
+
+
+
+# Figure S6
+
+I will create an alluvial plot. This will show the annotations and how they split up into different functional groups. 
+
+
+``` r
+BGC_data <- bgc %>%
+  dplyr::select(Contig, Type_antismash, Type_MIBiG, Activity_general) %>%
+  group_by(Type_antismash, Type_MIBiG, Activity_general) %>%
+  dplyr::summarise(Count = n()) %>%
+  ungroup()
+```
+
+```
+## `summarise()` has grouped output by 'Type_antismash', 'Type_MIBiG'. You can
+## override using the `.groups` argument.
+```
+
+``` r
+MIBIG <- BGC_data$Type_MIBiG %>% unique
+MIBIG <- MIBIG[!MIBIG == "No MIBiG annotation"]
+
+BGC_data$Type_MIBiG <- factor(BGC_data$Type_MIBiG, levels = c("RiPP",
+                                                              "Other, RiPP",
+                                                              "Other (Nucleoside)",
+                                                              "Other (Fatty acid)",
+                                                              "NRP",
+                                                              "Other (Non-NRP siderophore)",
+                                                              "Alkaloid",
+                                                              "NRP, Polyketide",
+                                                              "Polyketide",
+                                                              "Other",
+                                                              "Terpene",
+                                                              "Terpene, Saccharide",
+                                                              "Saccharide",
+                                                              "No MIBiG annotation"))
+
+BGC_data$Activity_general <- factor(BGC_data$Activity_general, levels = c("antimicrobial", 
+                                                                          "antimicrobial, cytotoxic", 
+                                                                          "antimicrobial precursor",
+                                                                          "antimicrobial defense", 
+                                                                          "antibiotic resistance",
+                                                                          "cytotoxic", 
+                                                                          "phytotoxic",
+                                                                          "toxin",
+                                                                          "virulence factor",
+                                                                          "quorum sensing",
+                                                                          "siderophore",
+                                                                          "zincophore",
+                                                                          "antistress",
+                                                                          "osmolyte",
+                                                                          "membrane",
+                                                                          "capsule production",
+                                                                          "pigment",
+                                                                          "fluorophore",
+                                                                          "non-antimicrobial",
+                                                                          "unknown"))
+
+addline_format <- function(x,...){
+    gsub("\\(", "\n(", x)
+}
+
+ggplot(BGC_data,
+       aes(axis1 = Type_antismash, axis2 = Type_MIBiG, axis3 = Activity_general,
+           y = Count)) +
+  geom_alluvium(aes(fill = Activity_general), alpha = 0.9) +
+  geom_stratum(width = 6/16, , alpha = 0.8,  color = "black") +
+  geom_label(stat = "stratum", aes(label = after_stat(stratum)), fontface = "bold", size = 2.5) +
+  scale_x_discrete(limits = c("BGC type", "MIBiG type", "Function"),
+                   expand = c(0.15, 0.05),
+                   labels = addline_format(c("BGC type (from antiSMASH)", 
+                        "MIBiG type (nearest MIBiG annotation)", "Function (literature search)"))) +
+  labs(y = "Number of contigs", fill = "Activity") +
+  theme_minimal() + 
+  scale_fill_manual(values = stepped(n = 20)) +
+  theme(axis.text.x = element_text(face="bold", size=12, color="black"), 
+        axis.title.x = element_text(face="bold", size=16, color="black"),
+        axis.text.y = element_text(face="bold", size=12, color="black"),
+        axis.title.y = element_blank(),
+        strip.text = element_text(size=10, face="bold"),
+        plot.title = element_text(size=20, face="bold"))
+```
+
+<img src="../figures/fig-unnamed-chunk-3-1.png" width="672" />
+
+``` r
+#ggsave("../figures/BGC_alluvial_8.12.25.pdf", width = 9, height = 12)
+```
+
+I'd like to look at only the antimicrobial-type compounds and what the compounds are that they were closely annotated as. I also only want to focus on those BGC's that had a hit in the MIBiG database as I can be more confident on potential functions. This might be best in a table-based format:
+
+
+``` r
+antimicrobials <- bgc %>% 
+  filter(Activity_general %in% c("antimicrobial", "antimicrobial, cytotoxic", "antimicrobial precursor", "antimicrobial defense", "antibiotic resistance", "cytotoxic", "phytotoxic", "toxin", "virulence factor")) %>% 
+  dplyr::select(Contig, MIBiG_Reference_Active, Similarity_Score, Compound, Organism, Type_of_activity_or_function, Activity_general) %>%
+  filter(!is.na(MIBiG_Reference_Active)) %>%
+  arrange(Compound) 
+
+antimicrobials %>%
+  kbl() %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+<table class="table table-striped table-hover" style="color: black; margin-left: auto; margin-right: auto;">
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Contig </th>
+   <th style="text-align:left;"> MIBiG_Reference_Active </th>
+   <th style="text-align:right;"> Similarity_Score </th>
+   <th style="text-align:left;"> Compound </th>
+   <th style="text-align:left;"> Organism </th>
+   <th style="text-align:left;"> Type_of_activity_or_function </th>
+   <th style="text-align:left;"> Activity_general </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> k127_583202 </td>
+   <td style="text-align:left;"> BGC0001244 </td>
+   <td style="text-align:right;"> 0.14 </td>
+   <td style="text-align:left;"> (-)-Mellein </td>
+   <td style="text-align:left;"> Parastagonospora nodorum </td>
+   <td style="text-align:left;"> phytotoxic </td>
+   <td style="text-align:left;"> phytotoxic </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1644372 </td>
+   <td style="text-align:left;"> BGC0001244 </td>
+   <td style="text-align:right;"> 0.17 </td>
+   <td style="text-align:left;"> (-)-Mellein </td>
+   <td style="text-align:left;"> Parastagonospora nodorum </td>
+   <td style="text-align:left;"> phytotoxic </td>
+   <td style="text-align:left;"> phytotoxic </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2851582 </td>
+   <td style="text-align:left;"> BGC0001244 </td>
+   <td style="text-align:right;"> 0.17 </td>
+   <td style="text-align:left;"> (-)-Mellein </td>
+   <td style="text-align:left;"> Parastagonospora nodorum </td>
+   <td style="text-align:left;"> phytotoxic </td>
+   <td style="text-align:left;"> phytotoxic </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1949486 </td>
+   <td style="text-align:left;"> BGC0000280 </td>
+   <td style="text-align:right;"> 0.19 </td>
+   <td style="text-align:left;"> 2,4-diacetylphloroglucinol </td>
+   <td style="text-align:left;"> Pseudomonas fluorescens </td>
+   <td style="text-align:left;"> antifungal </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_540813 </td>
+   <td style="text-align:left;"> BGC0001276 </td>
+   <td style="text-align:right;"> 0.20 </td>
+   <td style="text-align:left;"> 6-methylsalicyclic acid </td>
+   <td style="text-align:left;"> Aspergillus terreus </td>
+   <td style="text-align:left;"> antibiotic precursor </td>
+   <td style="text-align:left;"> antimicrobial precursor </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1798622 </td>
+   <td style="text-align:left;"> BGC0000554 </td>
+   <td style="text-align:right;"> 0.16 </td>
+   <td style="text-align:left;"> SRO15-3108 </td>
+   <td style="text-align:left;"> Streptomyces filamentosus NRRL 15998 </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2595483 </td>
+   <td style="text-align:left;"> BGC0000554 </td>
+   <td style="text-align:right;"> 0.16 </td>
+   <td style="text-align:left;"> SRO15-3108 </td>
+   <td style="text-align:left;"> Streptomyces filamentosus NRRL 15998 </td>
+   <td style="text-align:left;"> antimicrobial </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_3155461 </td>
+   <td style="text-align:left;"> BGC0000282 </td>
+   <td style="text-align:right;"> 0.23 </td>
+   <td style="text-align:left;"> alkylresorcinol </td>
+   <td style="text-align:left;"> Streptomyces griseus subsp. griseus NBRC 13350 </td>
+   <td style="text-align:left;"> antibiotic resistance </td>
+   <td style="text-align:left;"> antibiotic resistance </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2110777 </td>
+   <td style="text-align:left;"> BGC0001284 </td>
+   <td style="text-align:right;"> 0.17 </td>
+   <td style="text-align:left;"> alternariol </td>
+   <td style="text-align:left;"> Parastagonospora nodorum SN15 </td>
+   <td style="text-align:left;"> mycotoxin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_3355508 </td>
+   <td style="text-align:left;"> BGC0000016 </td>
+   <td style="text-align:right;"> 0.28 </td>
+   <td style="text-align:left;"> amphotericin B </td>
+   <td style="text-align:left;"> Streptomyces nodosus </td>
+   <td style="text-align:left;"> antifungal antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2746713 </td>
+   <td style="text-align:left;"> BGC0000308 </td>
+   <td style="text-align:right;"> 0.51 </td>
+   <td style="text-align:left;"> aureusimine A, aureusimine B, aureusimine C </td>
+   <td style="text-align:left;"> Staphylococcus aureus subsp. aureus str. JKD6008 </td>
+   <td style="text-align:left;"> virulence factor </td>
+   <td style="text-align:left;"> virulence factor </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1320292 </td>
+   <td style="text-align:left;"> BGC0000205 </td>
+   <td style="text-align:right;"> 0.16 </td>
+   <td style="text-align:left;"> bryostatin </td>
+   <td style="text-align:left;"> Candidatus Endobugula sertula </td>
+   <td style="text-align:left;"> anticancer </td>
+   <td style="text-align:left;"> cytotoxic </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_3376861 </td>
+   <td style="text-align:left;"> BGC0000205 </td>
+   <td style="text-align:right;"> 0.11 </td>
+   <td style="text-align:left;"> bryostatin </td>
+   <td style="text-align:left;"> Candidatus Endobugula sertula </td>
+   <td style="text-align:left;"> anticancer </td>
+   <td style="text-align:left;"> cytotoxic </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_494750 </td>
+   <td style="text-align:left;"> BGC0002579 </td>
+   <td style="text-align:right;"> 0.20 </td>
+   <td style="text-align:left;"> carnobacteriocin XY </td>
+   <td style="text-align:left;"> Carnobacterium maltaromaticum </td>
+   <td style="text-align:left;"> bacteriocin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1764250 </td>
+   <td style="text-align:left;"> BGC0002554 </td>
+   <td style="text-align:right;"> 0.25 </td>
+   <td style="text-align:left;"> carquinostatin A, carquinostatin B </td>
+   <td style="text-align:left;"> Streptomyces exfoliatus </td>
+   <td style="text-align:left;"> antibiotic, antioxidant </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2951138 </td>
+   <td style="text-align:left;"> BGC0001400 </td>
+   <td style="text-align:right;"> 0.14 </td>
+   <td style="text-align:left;"> citreoviridin </td>
+   <td style="text-align:left;"> Aspergillus terreus NIH2624 </td>
+   <td style="text-align:left;"> mycotoxin </td>
+   <td style="text-align:left;"> toxin </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_3277456 </td>
+   <td style="text-align:left;"> BGC0001400 </td>
+   <td style="text-align:right;"> 0.16 </td>
+   <td style="text-align:left;"> citreoviridin </td>
+   <td style="text-align:left;"> Aspergillus terreus NIH2624 </td>
+   <td style="text-align:left;"> mycotoxin </td>
+   <td style="text-align:left;"> toxin </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1403218 </td>
+   <td style="text-align:left;"> BGC0000894 </td>
+   <td style="text-align:right;"> 0.33 </td>
+   <td style="text-align:left;"> citrinin </td>
+   <td style="text-align:left;"> Monascus aurantiacus </td>
+   <td style="text-align:left;"> mycotoxin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_177347 </td>
+   <td style="text-align:left;"> BGC0000617 </td>
+   <td style="text-align:right;"> 0.21 </td>
+   <td style="text-align:left;"> coagulin </td>
+   <td style="text-align:left;"> Bacillus coagulans </td>
+   <td style="text-align:left;"> bacteriocin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_31144 </td>
+   <td style="text-align:left;"> BGC0000043 </td>
+   <td style="text-align:right;"> 0.12 </td>
+   <td style="text-align:left;"> curacin A </td>
+   <td style="text-align:left;"> Moorea producens 19L </td>
+   <td style="text-align:left;"> antimitotic, antiproliferative </td>
+   <td style="text-align:left;"> cytotoxic </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_3406911 </td>
+   <td style="text-align:left;"> BGC0002311 </td>
+   <td style="text-align:right;"> 2.00 </td>
+   <td style="text-align:left;"> cutimycin </td>
+   <td style="text-align:left;"> Cutibacterium acnes KPA171202 </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2409826 </td>
+   <td style="text-align:left;"> BGC0001291 </td>
+   <td style="text-align:right;"> 0.18 </td>
+   <td style="text-align:left;"> enterocin NKR-5-3B </td>
+   <td style="text-align:left;"> Enterococcus faecium </td>
+   <td style="text-align:left;"> bacteriocin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2692107 </td>
+   <td style="text-align:left;"> BGC0000348 </td>
+   <td style="text-align:right;"> 0.29 </td>
+   <td style="text-align:left;"> ergovaline </td>
+   <td style="text-align:left;"> Epichloe festucae var. lolii </td>
+   <td style="text-align:left;"> toxin </td>
+   <td style="text-align:left;"> toxin </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1652504 </td>
+   <td style="text-align:left;"> BGC0000056 </td>
+   <td style="text-align:right;"> 0.24 </td>
+   <td style="text-align:left;"> esperamicin </td>
+   <td style="text-align:left;"> Actinomadura verrucosospora </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2087331 </td>
+   <td style="text-align:left;"> BGC0000056 </td>
+   <td style="text-align:right;"> 0.23 </td>
+   <td style="text-align:left;"> esperamicin </td>
+   <td style="text-align:left;"> Actinomadura verrucosospora </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2143501 </td>
+   <td style="text-align:left;"> BGC0000056 </td>
+   <td style="text-align:right;"> 0.23 </td>
+   <td style="text-align:left;"> esperamicin </td>
+   <td style="text-align:left;"> Actinomadura verrucosospora </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2728492 </td>
+   <td style="text-align:left;"> BGC0000056 </td>
+   <td style="text-align:right;"> 0.47 </td>
+   <td style="text-align:left;"> esperamicin </td>
+   <td style="text-align:left;"> Actinomadura verrucosospora </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2962513 </td>
+   <td style="text-align:left;"> BGC0002667 </td>
+   <td style="text-align:right;"> 0.06 </td>
+   <td style="text-align:left;"> estericin A </td>
+   <td style="text-align:left;"> Clostridium estertheticum </td>
+   <td style="text-align:left;"> bacteriocin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_519510 </td>
+   <td style="text-align:left;"> BGC0001872 </td>
+   <td style="text-align:right;"> 0.07 </td>
+   <td style="text-align:left;"> fabclavine-polyamine </td>
+   <td style="text-align:left;"> Xenorhabdus bovienii SS-2004 </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2342471 </td>
+   <td style="text-align:left;"> BGC0002404 </td>
+   <td style="text-align:right;"> 0.34 </td>
+   <td style="text-align:left;"> falcarindiol </td>
+   <td style="text-align:left;"> Solanum lycopersicum </td>
+   <td style="text-align:left;"> antimicrobial </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2788244 </td>
+   <td style="text-align:left;"> BGC0001171 </td>
+   <td style="text-align:right;"> 0.17 </td>
+   <td style="text-align:left;"> listeriolysin S </td>
+   <td style="text-align:left;"> Listeria monocytogenes serotype 4b str. F2365 </td>
+   <td style="text-align:left;"> bacteriocin, haemolytic, cytotoxic </td>
+   <td style="text-align:left;"> antimicrobial, cytotoxic </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_3016148 </td>
+   <td style="text-align:left;"> BGC0000622 </td>
+   <td style="text-align:right;"> 0.33 </td>
+   <td style="text-align:left;"> megacin </td>
+   <td style="text-align:left;"> Bacillus megaterium </td>
+   <td style="text-align:left;"> bacteriocin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1866128 </td>
+   <td style="text-align:left;"> BGC0000590 </td>
+   <td style="text-align:right;"> 0.31 </td>
+   <td style="text-align:left;"> microcin N </td>
+   <td style="text-align:left;"> Escherichia coli </td>
+   <td style="text-align:left;"> antimicrobial </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2032031 </td>
+   <td style="text-align:left;"> BGC0000607 </td>
+   <td style="text-align:right;"> 0.06 </td>
+   <td style="text-align:left;"> micrococcin P1 </td>
+   <td style="text-align:left;"> Macrococcus caseolyticus </td>
+   <td style="text-align:left;"> antimicrobial </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1691806 </td>
+   <td style="text-align:left;"> BGC0000569 </td>
+   <td style="text-align:right;"> 0.17 </td>
+   <td style="text-align:left;"> plantazolicin </td>
+   <td style="text-align:left;"> Bacillus velezensis FZB42 </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2758925 </td>
+   <td style="text-align:left;"> BGC0000569 </td>
+   <td style="text-align:right;"> 0.08 </td>
+   <td style="text-align:left;"> plantazolicin </td>
+   <td style="text-align:left;"> Bacillus velezensis FZB42 </td>
+   <td style="text-align:left;"> antibacterial </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1720900 </td>
+   <td style="text-align:left;"> BGC0000598 </td>
+   <td style="text-align:right;"> 0.04 </td>
+   <td style="text-align:left;"> polytheonamide A, polytheonamide B </td>
+   <td style="text-align:left;"> Candidatus Entotheonella factor </td>
+   <td style="text-align:left;"> cytotoxic </td>
+   <td style="text-align:left;"> cytotoxic </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2826510 </td>
+   <td style="text-align:left;"> BGC0001285 </td>
+   <td style="text-align:right;"> 0.07 </td>
+   <td style="text-align:left;"> pseudopyronine A, pseudopyronine B </td>
+   <td style="text-align:left;"> Pseudomonas putida </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1419840 </td>
+   <td style="text-align:left;"> BGC0000924 </td>
+   <td style="text-align:right;"> 0.22 </td>
+   <td style="text-align:left;"> pyrrolnitrin </td>
+   <td style="text-align:left;"> Pseudomonas chlororaphis </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2272593 </td>
+   <td style="text-align:left;"> BGC0001224 </td>
+   <td style="text-align:right;"> 0.20 </td>
+   <td style="text-align:left;"> reductasporine </td>
+   <td style="text-align:left;"> uncultured bacterium </td>
+   <td style="text-align:left;"> antifungal </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2403898 </td>
+   <td style="text-align:left;"> BGC0001758 </td>
+   <td style="text-align:right;"> 0.23 </td>
+   <td style="text-align:left;"> rhizomide A, rhizomide B, rhizomide C </td>
+   <td style="text-align:left;"> Paraburkholderia rhizoxinica HKI 454 </td>
+   <td style="text-align:left;"> antibiotic, cytotoxic </td>
+   <td style="text-align:left;"> antimicrobial, cytotoxic </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2665479 </td>
+   <td style="text-align:left;"> BGC0001909 </td>
+   <td style="text-align:right;"> 0.25 </td>
+   <td style="text-align:left;"> strobilurin A </td>
+   <td style="text-align:left;"> Strobilurus tenacellus </td>
+   <td style="text-align:left;"> fungicidal </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_571307 </td>
+   <td style="text-align:left;"> BGC0000602 </td>
+   <td style="text-align:right;"> 0.21 </td>
+   <td style="text-align:left;"> subtilosin A </td>
+   <td style="text-align:left;"> Bacillus subtilis subsp. spizizenii ATCC 6633 </td>
+   <td style="text-align:left;"> bacteriocin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2500724 </td>
+   <td style="text-align:left;"> BGC0002518 </td>
+   <td style="text-align:right;"> 0.34 </td>
+   <td style="text-align:left;"> syringafactin A, syringafactin C </td>
+   <td style="text-align:left;"> Pseudomonas sp. SZ57 </td>
+   <td style="text-align:left;"> antimicrobial defense </td>
+   <td style="text-align:left;"> antimicrobial defense </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1963357 </td>
+   <td style="text-align:left;"> BGC0001207 </td>
+   <td style="text-align:right;"> 0.05 </td>
+   <td style="text-align:left;"> teixobactin </td>
+   <td style="text-align:left;"> Eleftheria terrae </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1340830 </td>
+   <td style="text-align:left;"> BGC0002437 </td>
+   <td style="text-align:right;"> 0.27 </td>
+   <td style="text-align:left;"> thermoactinoamide A </td>
+   <td style="text-align:left;"> Thermoactinomyces sp. AS95 </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1885763 </td>
+   <td style="text-align:left;"> BGC0002437 </td>
+   <td style="text-align:right;"> 0.26 </td>
+   <td style="text-align:left;"> thermoactinoamide A </td>
+   <td style="text-align:left;"> Thermoactinomyces sp. AS95 </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_437473 </td>
+   <td style="text-align:left;"> BGC0002442 </td>
+   <td style="text-align:right;"> 0.14 </td>
+   <td style="text-align:left;"> toyoncin </td>
+   <td style="text-align:left;"> Bacillus toyonensis </td>
+   <td style="text-align:left;"> bacteriocin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_2082044 </td>
+   <td style="text-align:left;"> BGC0002442 </td>
+   <td style="text-align:right;"> 0.16 </td>
+   <td style="text-align:left;"> toyoncin </td>
+   <td style="text-align:left;"> Bacillus toyonensis </td>
+   <td style="text-align:left;"> bacteriocin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_235399 </td>
+   <td style="text-align:left;"> BGC0000880 </td>
+   <td style="text-align:right;"> 0.08 </td>
+   <td style="text-align:left;"> tunicamycin B1 </td>
+   <td style="text-align:left;"> Streptomyces chartreusis NRRL 3882 </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1428737 </td>
+   <td style="text-align:left;"> BGC0000494 </td>
+   <td style="text-align:right;"> 0.09 </td>
+   <td style="text-align:left;"> uberolysin </td>
+   <td style="text-align:left;"> Streptococcus uberis </td>
+   <td style="text-align:left;"> bacteriocin </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1001445 </td>
+   <td style="text-align:left;"> BGC0000286 </td>
+   <td style="text-align:right;"> 0.23 </td>
+   <td style="text-align:left;"> viguiepinol </td>
+   <td style="text-align:left;"> Streptomyces sp. KO-3988 </td>
+   <td style="text-align:left;"> antibiotic </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1140781 </td>
+   <td style="text-align:left;"> BGC0001825 </td>
+   <td style="text-align:right;"> 0.19 </td>
+   <td style="text-align:left;"> xenematide </td>
+   <td style="text-align:left;"> Xenorhabdus nematophila AN6/1 </td>
+   <td style="text-align:left;"> antimicrobial </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_1610045 </td>
+   <td style="text-align:left;"> BGC0001825 </td>
+   <td style="text-align:right;"> 0.21 </td>
+   <td style="text-align:left;"> xenematide </td>
+   <td style="text-align:left;"> Xenorhabdus nematophila AN6/1 </td>
+   <td style="text-align:left;"> antimicrobial </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_3314053 </td>
+   <td style="text-align:left;"> BGC0001825 </td>
+   <td style="text-align:right;"> 0.20 </td>
+   <td style="text-align:left;"> xenematide </td>
+   <td style="text-align:left;"> Xenorhabdus nematophila AN6/1 </td>
+   <td style="text-align:left;"> antimicrobial </td>
+   <td style="text-align:left;"> antimicrobial </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> k127_878461 </td>
+   <td style="text-align:left;"> BGC0000465 </td>
+   <td style="text-align:right;"> 0.32 </td>
+   <td style="text-align:left;"> xenortide A, xenortide B, xenortide C, xenortide D </td>
+   <td style="text-align:left;"> Xenorhabdus nematophila ATCC 19061 </td>
+   <td style="text-align:left;"> cytotoxic </td>
+   <td style="text-align:left;"> cytotoxic </td>
+  </tr>
+</tbody>
+</table>
+
+``` r
+#antimicrobials$Contig
+
+# make a file of all the Contig IDs that are likely antimicrobial or toxin encoding
+# write(antimicrobials$Contig, file = "../data/antimicrobial.bgc.contigs.txt")
+```
+
+Are the compounds here more prevalent in the different fates compared to others? 
+
+I will use CoverM, which has a "contig" setting to investigate both the mean number of reads covering each position in the contig as well as the rpkm based abundances. From there, I will choose a threshold for presence/absence and calculate the prevalence of the BGC's in the different fates. I will look for which BGCs are more prevalent in anyt of the fates. For the mean abundance, it calculates mean coverage, and only generates a value if at least 10% of the contig is covered in reads. This helps reduce me callling something "present" just due to spurious alignments. 
+
+First - Need to manipulate the data. I need to put it in a presence/absence format.
+
+# Figure 6 code
+
+Theres a lot of very low values. Try making presence/absence with anything above 0 being present.
+
+
+``` r
+antibac_presabs <- ifelse(antibac > 0, 1, 0)
+```
+
+I will show mean coverage as I think it is a little more intuitive. The idea is that in the sample the reads cover differently sized contigs and it is the amount of the contig that is covered. I am assuming that if any part of a contig is covered (at the threshold set by the program), then it is likely found in that coral holobiont and thus that BGC may be in that coral.
+
+Maybe I can make a heatmap of the different contigs and color them by the health/disease status of the samples and by the grouping of the BCG. And make the presence/absence just black and white.
+
+
+``` r
+metadata$CoralID
+```
+
+```
+##  [1] "617"  "663"  "675"  "679"  "689"  "693"  "695"  "699"  "713"  "719" 
+## [11] "741"  "753"  "765"  "1220" "1280" "1332" "1340" "1452" "1463" "3342"
+## [21] "3343" "3420" "3421" "3446" "4360" "4503" "4616" "N46"  "N48"  "N49" 
+## [31] "N50"  "N52"  "N53"  "N54"  "N56"  "N58"  "N59"  "N60"  "N67"  "N70" 
+## [41] "N72"  "N73"
+```
+
+``` r
+colnames(antibac_presabs)
+```
+
+```
+##  [1] "1220" "1280" "1332" "1340" "1452" "1463" "3342" "3343" "3420" "3421"
+## [11] "3446" "4360" "4503" "4616" "617"  "663"  "675"  "679"  "689"  "693" 
+## [21] "695"  "699"  "713"  "719"  "741"  "753"  "765"  "N46"  "N48"  "N50" 
+## [31] "N52"  "N53"  "N54"  "N56"  "N58"  "N59"  "N60"  "N67"  "N70"  "N72" 
+## [41] "N73"
+```
+
+``` r
+# Subset metadata and get it in the same order as the heatmap data
+idx <- match(colnames(antibac_presabs), metadata$CoralID)
+metadata_bgc <- metadata[idx, ]
+
+match(metadata_bgc$CoralID, colnames(antibac_presabs))
+```
+
+```
+##  [1]  1  2  3  4  5  6  7  8  9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25
+## [26] 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40 41
+```
+
+``` r
+# Categorical information (e.g Sample Disease Status)
+annotation_col <- data.frame(
+  Colony_Fate = metadata_bgc$Fate_after_SP1)
+rownames(annotation_col) <- colnames(antibac_presabs)
+
+annotation_col$Colony_Fate <- factor(annotation_col$Colony_Fate, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
+
+# Custom colors for annotation
+ann_colors <- list(
+  Colony_Fate = c(Unaffected = "#482173", Recovered = "#2e6f8e", `Will be diseased` = "#29af7f", Diseased = "#FFC20A"),
+  Activity_General = c(
+    "antimicrobial" = "#990F26", 
+    "antimicrobial, cytotoxic" = "#CC7A88", 
+    "antimicrobial precursor" = "#99600F",
+    "antimicrobial defense" = "#CCAA7A", 
+    "antibiotic resistance" = "#54990F",
+    "cytotoxic" = "#CFE6B8", 
+    "phytotoxic" = "#3E9FB3",
+    "toxin" = "#B8DEE6",
+    "virulence factor" = "#967ACC"
+  )
+)
+
+# Categorical annotation for rows (e.g. BGC types)
+#antimicrobials$Contig
+#rownames(antibac_presabs)
+
+antimicrobials$Contig_Compound <- paste0(antimicrobials$Contig," (", antimicrobials$Compound, ")")
+
+# Get the rows to match with the BGC metadata
+idx <- match(rownames(antibac_presabs), antimicrobials$Contig)
+bgc_antimicrobial_info <- antimicrobials[idx, ]
+
+# Check it worked
+# match(bgc_antimicrobial_info$Contig, rownames(antibac_presabs))
+
+# Rename the rows of the matrix by the new contig and compound name
+antibac_presabs_forheatmap <- antibac_presabs
+rownames(antibac_presabs_forheatmap) <- bgc_antimicrobial_info$Contig_Compound
+
+# Set annotation levels for contigs (General Activity of BGC)
+annotation_row <- data.frame(
+  Activity_General = bgc_antimicrobial_info$Activity_general)
+
+rownames(annotation_row) <- rownames(antibac_presabs_forheatmap)
+
+annotation_row$Activity_General <- factor(annotation_row$Activity_General, levels = c("antimicrobial", 
+                                                                          "antimicrobial, cytotoxic", 
+                                                                          "antimicrobial precursor",
+                                                                          "antimicrobial defense", 
+                                                                          "antibiotic resistance",
+                                                                          "cytotoxic", 
+                                                                          "phytotoxic",
+                                                                          "toxin",
+                                                                          "virulence factor"))
+
+# Define a black-to-white color gradient
+bw_colors <- colorRampPalette(c("white", "black"))(10)
+
+# Generate heatmap with colored gene names
+pheatmap(antibac_presabs_forheatmap, 
+        annotation_row = annotation_row, 
+        annotation_colors = ann_colors,
+        annotation_col = annotation_col, 
+        color = bw_colors,
+        cluster_rows = TRUE, cluster_cols = TRUE,
+        clustering_distance_rows = "euclidean", 
+        clustering_distance_cols = "euclidean")
+```
+
+<img src="../figures/fig-BGC-1.png" width="672" />
+
+``` r
+# Save heatmap to PDF
+# pdf("../figures/BGC_antimicrobial_heatmap_10.27.25_TEST.pdf", width = 13, height = 9)
+# pheatmap(antibac_presabs_forheatmap, 
+#         annotation_row = annotation_row, 
+#         annotation_colors = ann_colors,
+#         annotation_col = annotation_col, 
+#         color = bw_colors,
+#         border_color = "black",
+#         cluster_rows = TRUE, cluster_cols = TRUE)
+# dev.off()  # Close the PDF device
+
+# Make it without the legend for easier graphing
+pheatmap(antibac_presabs_forheatmap, 
+        annotation_row = annotation_row, 
+        annotation_colors = ann_colors,
+        annotation_col = annotation_col, 
+        color = bw_colors,
+        cluster_rows = TRUE, cluster_cols = TRUE,
+        clustering_distance_rows = "euclidean", 
+        clustering_distance_cols = "euclidean",
+        legend = FALSE, 
+        annotation_legend = FALSE)
+```
+
+<img src="../figures/fig-BGC-2.png" width="672" />
+
+## Fig 6 Stats (Fisher's Exact Test)
+
+I want to see if any of the BGC's were significantly differentially prevalent across Colony Fate. 
+
+I hypothesize that the unaffected and recovered coral samples may have a greater prevalence of BGC's encoding potential antimicrobial or toxic compounds to help support the maintenance of the coral host and protect against infection. This is supported by the differential abundance data. 
+
+Use a fisher's exact test to test that one gene is significantly differentially prevalent between unaffected and diseased corals.
+
+A fisher's exact test works with presence/absence data and it also works well with small sample sizes. Since the recovered group is only 4 smaples, this is a better target than the chi squared test. 
+
+``` r
+# Test on one gene first to verify it works. 
+
+#Combine all the info
+bgc_all_data <- antibac_presabs %>% 
+  as_tibble() %>%
+  mutate(Contig = rownames(antibac_presabs)) %>%
+  left_join(antimicrobials, by = "Contig") %>%
+  gather(key = "sample", value = "pres_abs", `1220`:N73) %>%
+  mutate(pres_abs_words = ifelse(pres_abs == 1, "Present", "Absent")) %>%
+  left_join(metadata_bgc, by = c("sample" = "CoralID"))
+
+# Try with just one BGC to test out the Fisher's Exact Test to see that it works
+# bgc_test <- bgc_all_data %>%
+#   filter(Contig == "k127_2342471") %>%
+#   group_by(Fate_after_SP1, pres_abs_words) %>%
+#   summarize(count = length(pres_abs_words)) %>%
+#   tidyr::spread(Fate_after_SP1, count) %>%
+#   dplyr::select(Unaffected, Recovered, `Will be diseased`, Diseased) %>%
+#   as.data.frame()
+# 
+# rownames(bgc_test) <- c("Absent", "Present")
+# 
+# # Run the Fisher's exact test - testing the null of independence of rows and columns in the contingency table - null hypothesis - no difference between presence and absence of genes 
+# set.seed(100)
+# fisher_result <- fisher.test(bgc_test, simulate.p.value = TRUE)
+# print(fisher_result)
+# 
+# fisher_result$p.value
+```
+
+
+``` r
+# Create a function to perform Fisher's exact test
+perform_fisher_test <- function(gene_row) {
+  # Create a 2x4 contingency table
+  contingency_table <- matrix(as.integer(gene_row[2:9]), nrow = 2) #make sure the table is an integer
+  
+  # Perform Fisher's exact test - simulate p val with Monte Carlo because bigger than 2x2 table
+  set.seed(100)
+  fisher_result <- fisher.test(contingency_table, simulate.p.value = TRUE)
+  
+  # Return the p-value
+  return(fisher_result$p.value)
+}
+
+BGC_fisher_fate <- bgc_all_data %>%
+  group_by(Contig, Fate_after_SP1, pres_abs_words) %>%
+  summarize(count = length(pres_abs_words)) %>%
+  mutate(fate_presabs = paste0(Fate_after_SP1,"_",pres_abs_words)) %>%
+  ungroup() %>%
+  dplyr::select(Contig, count, fate_presabs) %>%
+  as.data.frame() 
+```
+
+```
+## `summarise()` has grouped output by 'Contig', 'Fate_after_SP1'. You can
+## override using the `.groups` argument.
+```
+
+``` r
+bgcs_antimicrobials <- BGC_fisher_fate$Contig
+
+BGC_fisher_fate_wide <- BGC_fisher_fate %>%
+  group_by(Contig) %>%
+  dplyr::select(count, fate_presabs) %>%
+  pivot_wider(names_from = fate_presabs, values_from = count, values_fill = 0)
+```
+
+```
+## Adding missing grouping variables: `Contig`
+```
+
+``` r
+# Apply the function to each row (gene) in the table and perform a multiple test correction
+p_values_fate <- base::apply(BGC_fisher_fate_wide, 1, perform_fisher_test)
+
+p_adjusted_BH_fate <- p.adjust(p_values_fate, method = "BH")
+
+# Combine gene names and p-values into a table
+bgc_p_values_fate <- data.frame(Contig = BGC_fisher_fate_wide$Contig, Adj_P_Value = p_adjusted_BH_fate, P_Value = p_values_fate) %>% 
+  mutate(significant = ifelse(Adj_P_Value < 0.05, "significant", "not")) %>%
+  mutate(sig_non_adj = ifelse(P_Value < 0.05, "significant", "not"))
+
+# Print the table - see which genes are different between high and low resistant corals
+# print(bgc_p_values_fate)
+
+# Add the p-values to the antimicrobials table
+antimicrobials_with_pval <- left_join(antimicrobials, bgc_p_values_fate, by = "Contig")
+
+# How many of each type?
+# table(antimicrobials$Compound)
+
+# Which compounds are most prevalent across all corals?
+contig_prev <- data.frame(Contig = rownames(antibac_presabs), 
+                          N_coral_present = rowSums(antibac_presabs)) %>%
+  left_join(antimicrobials, by = "Contig") %>%
+  arrange(desc(N_coral_present))
+```
+Cool...looks like none of the biosynthetic gene clusters were significantly differentially prevalent across coral fates. The takeaway there is that corals of all fates harbor the BGCs that encode diverse antimicrobial functions, and while the differential abundance test indicated there was lower abundance of BGCs, it isn't statistically differentially prevalent. These clusters may help both maintain the coral holobiont through production of diverse antimicrobial compounds or even promote infection in diseased corals. 

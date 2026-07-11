@@ -1,7 +1,14 @@
 ---
-title: "BGC_analysis"
-output: html_document
-date: "2024-12-09"
+title: "BGC Analysis"
+author: "Cynthia Becker"
+date: "2026-07-11"
+output:
+  html_document:
+    keep_md: true
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    theme: united
 ---
 
 ```{r setup, include=FALSE}
@@ -46,11 +53,6 @@ antibac <- read.delim("../data/FLK_prok_coassembly_BGC_antimicro_mean.tsv", sep 
 
 # Fix the column names to only extract the name of the sample
 colnames(antibac) <- str_split_i(str_split_i(colnames(antibac), "[.]", 3), "_", 1)
-
-antibac_rpkm <- read.delim("../data/FLK_prok_coassembly_BGC_antimicro_rpkm.tsv", sep = "\t", row.names = 1)
-
-# Fix the column names to only extract the name of the sample
-colnames(antibac_rpkm) <- str_split_i(str_split_i(colnames(antibac_rpkm), "[.]", 3), "_", 1)
 ```
 
 Need to read in the count, taxonomy, and metadata data for each gene. 
@@ -78,7 +80,7 @@ colnames(prokreads_nozero) <- str_replace_all(colnames(prokreads_nozero), patter
 colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
 
 # Read in the taxonomy
-prok_taxa <- read.table("../data/FLK_prok_coassembly_tax_mmseqs2.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
+prok_taxa <- read.table("../data/FLK_OFAV_MG_prok_coassembly_tax_mmseqs2.tsv", header = FALSE, col.names = c("contig", "ncbi_taxid", "rank", "annotation", "complete_classification"), na.strings = "", sep = "\t")
 
 ## Subset the metadata
 idx <- match(colnames(prokreads_nozero), rownames(metadata))
@@ -87,16 +89,10 @@ metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced samp
 
 
 
-# MS ANALYSIS
+# Figure S6
 
-First question: What are the types of BGC's in the coral holobiont?
-- What are the antiSMASH "Types"?
-- What are the closest hits in the MIBiG database? (chose the hit with the closest similarity score)
-- What is the potential function of that closest hit based on the literature cited by MIBiG?
+I will create an alluvial plot. This will show the annotations and how they split up into different functional groups. 
 
-A potential useful graphic here could be a alluvial plot. This would show the annotations and how they split up into different functional groups. 
-
-## alluvial plot
 ```{r}
 BGC_data <- bgc %>%
   dplyr::select(Contig, Type_antismash, Type_MIBiG, Activity_general) %>%
@@ -184,20 +180,19 @@ antimicrobials %>%
   kbl() %>% 
   kable_styling(bootstrap_options = c("striped", "hover"))
 
-antimicrobials$Contig
+#antimicrobials$Contig
 
 # make a file of all the Contig IDs that are likely antimicrobial or toxin encoding
 # write(antimicrobials$Contig, file = "../data/antimicrobial.bgc.contigs.txt")
 ```
 
-Are the compounds here more prevalent in the different fates compared to others?? Maybe just look for presence/absence rather than abundance since it is unclear what the actual activity would be. We are just looking for general abundance. 
+Are the compounds here more prevalent in the different fates compared to others? 
 
-I will use CoverM, which has a "contig" setting to investigate both the mean number of reads covering each position in the contig as well as the rpkm based abundances. From there, I will choose a threshold for presence/absence and calculate the prevalence of the BGC's in the different fates. I will look for which BGCs are more prevalent in anyt of the fates.  
-I will use the mean coverage metric more than likely rather than the RPKM term. It seems a little more intuitive and I like that I could also set a threshold for what I will consider an acceptable mean coverage value. 
+I will use CoverM, which has a "contig" setting to investigate both the mean number of reads covering each position in the contig as well as the rpkm based abundances. From there, I will choose a threshold for presence/absence and calculate the prevalence of the BGC's in the different fates. I will look for which BGCs are more prevalent in anyt of the fates. For the mean abundance, it calculates mean coverage, and only generates a value if at least 10% of the contig is covered in reads. This helps reduce me callling something "present" just due to spurious alignments. 
 
-First - Need to manipulate the data. I need to put it in a presence/absence format. Maybe to start, I could just take a look at all the data. 
+First - Need to manipulate the data. I need to put it in a presence/absence format.
 
-## Mean exploration
+# Figure 6 code
 
 Theres a lot of very low values. Try making presence/absence with anything above 0 being present.
 
@@ -207,11 +202,9 @@ antibac_presabs <- ifelse(antibac > 0, 1, 0)
 
 I will show mean coverage as I think it is a little more intuitive. The idea is that in the sample the reads cover differently sized contigs and it is the amount of the contig that is covered. I am assuming that if any part of a contig is covered (at the threshold set by the program), then it is likely found in that coral holobiont and thus that BGC may be in that coral.
 
-## Heatmap, mean pres/abs
-
 Maybe I can make a heatmap of the different contigs and color them by the health/disease status of the samples and by the grouping of the BCG. And make the presence/absence just black and white.
 
-```{r}
+```{r BGC}
 metadata$CoralID
 colnames(antibac_presabs)
 
@@ -245,8 +238,8 @@ ann_colors <- list(
 )
 
 # Categorical annotation for rows (e.g. BGC types)
-antimicrobials$Contig
-rownames(antibac_presabs)
+#antimicrobials$Contig
+#rownames(antibac_presabs)
 
 antimicrobials$Contig_Compound <- paste0(antimicrobials$Contig," (", antimicrobials$Compound, ")")
 
@@ -255,7 +248,7 @@ idx <- match(rownames(antibac_presabs), antimicrobials$Contig)
 bgc_antimicrobial_info <- antimicrobials[idx, ]
 
 # Check it worked
-match(bgc_antimicrobial_info$Contig, rownames(antibac_presabs))
+# match(bgc_antimicrobial_info$Contig, rownames(antibac_presabs))
 
 # Rename the rows of the matrix by the new contig and compound name
 antibac_presabs_forheatmap <- antibac_presabs
@@ -291,111 +284,30 @@ pheatmap(antibac_presabs_forheatmap,
         clustering_distance_cols = "euclidean")
 
 # Save heatmap to PDF
-pdf("../figures/BGC_antimicrobial_heatmap_10.27.25_TEST.pdf", width = 13, height = 9)
+# pdf("../figures/BGC_antimicrobial_heatmap_10.27.25_TEST.pdf", width = 13, height = 9)
+# pheatmap(antibac_presabs_forheatmap, 
+#         annotation_row = annotation_row, 
+#         annotation_colors = ann_colors,
+#         annotation_col = annotation_col, 
+#         color = bw_colors,
+#         border_color = "black",
+#         cluster_rows = TRUE, cluster_cols = TRUE)
+# dev.off()  # Close the PDF device
+
+# Make it without the legend for easier graphing
 pheatmap(antibac_presabs_forheatmap, 
         annotation_row = annotation_row, 
         annotation_colors = ann_colors,
         annotation_col = annotation_col, 
         color = bw_colors,
-        border_color = "black",
-        cluster_rows = TRUE, cluster_cols = TRUE)
-dev.off()  # Close the PDF device
+        cluster_rows = TRUE, cluster_cols = TRUE,
+        clustering_distance_rows = "euclidean", 
+        clustering_distance_cols = "euclidean",
+        legend = FALSE, 
+        annotation_legend = FALSE)
 ```
 
-## Stats - Fisher's Exact Test
-
-I want to see if any of the BGC's were significantly differentially prevalent between unaffected and diseased corals. 
-
-I hypothesize that the healthy coral samples may have a greater prevalence of BGC's encoding potential antimicrobial or toxic compounds to help support the maintenance of the coral host and protect against infection. 
-
-Use a fisher's exact test to test that one gene is significantly differentially prevalent between unaffected and diseased corals.
-```{r}
-#Combine all the info
-bgc_all_data <- antibac_presabs %>% 
-  as_tibble() %>%
-  mutate(Contig = rownames(antibac_presabs)) %>%
-  left_join(antimicrobials, by = "Contig") %>%
-  gather(key = "sample", value = "pres_abs", `1220`:N73) %>%
-  mutate(pres_abs_words = ifelse(pres_abs == 1, "Present", "Absent")) %>%
-  left_join(metadata_bgc, by = c("sample" = "CoralID"))
-
-# Try with just one BGC to test out the Fisher's Exact Test to see that it works
-bgc_test <- bgc_all_data %>%
-  filter(Contig == "k127_2342471") %>%
-  group_by(Disease_on_colony_when_coring_binary, pres_abs_words) %>%
-  summarize(count = length(pres_abs_words)) %>%
-  tidyr::spread(Disease_on_colony_when_coring_binary, count) %>%
-  dplyr::select(Unaffected, Diseased) %>%
-  as.data.frame()
-
-rownames(bgc_test) <- c("Absent", "Present")
-
-# Run the Fisher's exact test - testing the null of independence of rows and columns in the contingency table - null hypothesis - no difference between presence and absence of genes 
-set.seed(100)
-fisher_result <- fisher.test(bgc_test)
-print(fisher_result)
-
-bgc_all_data %>% filter(Contig == "k127_2826510")
-```
-
-```{r}
-# Create a function to perform Fisher's exact test
-perform_fisher_test <- function(gene_row) {
-  # Create a 2x2 contingency table
-  contingency_table <- matrix(as.integer(gene_row[2:5]), nrow = 2) #make sure the table is an integer
-  
-  # Perform Fisher's exact test
-  set.seed(100)
-  fisher_result <- fisher.test(contingency_table)
-  
-  # Return the p-value
-  return(fisher_result$p.value)
-}
-
-BGC_fisher <- bgc_all_data %>%
-  group_by(Contig, Disease_on_colony_when_coring_binary, pres_abs_words) %>%
-  summarize(count = length(pres_abs_words)) %>%
-  mutate(disease_presabs = paste0(Disease_on_colony_when_coring_binary,"_",pres_abs_words)) %>%
-  ungroup() %>%
-  dplyr::select(Contig, count, disease_presabs) %>%
-  as.data.frame() 
-
-bgcs_antimicrobials <- BGC_fisher$Contig
-
-BGC_fisher_wide <- BGC_fisher %>%
-  group_by(Contig) %>%
-  dplyr::select(count, disease_presabs) %>%
-  pivot_wider(names_from = disease_presabs, values_from = count, values_fill = 0)
-  #mutate(keep = ifelse(High_Present + Low_Present == 0, FALSE, TRUE)) %>% # make a row ID'ing to keep or not some moduels
- # filter(keep == TRUE)
-
-# Apply the function to each row (gene) in the table and perform a multiple test correction
-p_values <- base::apply(BGC_fisher_wide, 1, perform_fisher_test)
-
-p_adjusted_BH <- p.adjust(p_values, method = "BH")
-
-# Combine gene names and p-values into a table
-bgc_p_values <- data.frame(Contig = BGC_fisher_wide$Contig, Adj_P_Value = p_adjusted_BH) %>% 
-  mutate(significant = ifelse(Adj_P_Value < 0.05, "significant", "not"))
-
-# Print the table - see which genes are different between high and low resistant corals
-print(bgc_p_values)
-
-# Add the p-values to the antimicrobials table
-antimicrobials_with_pval <- left_join(antimicrobials, bgc_p_values, by = "Contig")
-
-# How many of each type?
-table(antimicrobials$Compound)
-
-# Which compounds are most prevalent across all corals?
-contig_prev <- data.frame(Contig = rownames(antibac_presabs), 
-                          N_coral_present = rowSums(antibac_presabs)) %>%
-  left_join(antimicrobials, by = "Contig") %>%
-  arrange(desc(N_coral_present))
-```
-Cool...looks like none of the biosynthetic gene clusters were significantly differentially prevalent between the diseased and healthy corals. The takeaway there is that both diseased and healthy corals harbor the BGCs that encode diverse antimicrobial functions. These clusters may help both maintain the coral holobiont through production of diverse antimicrobial compounds or even promote infection in diseased corals. 
-
-## Fate - Fisher's Exact Test
+## Fig 6 Stats (Fisher's Exact Test)
 
 I want to see if any of the BGC's were significantly differentially prevalent across Colony Fate. 
 
@@ -405,6 +317,8 @@ Use a fisher's exact test to test that one gene is significantly differentially 
 
 A fisher's exact test works with presence/absence data and it also works well with small sample sizes. Since the recovered group is only 4 smaples, this is a better target than the chi squared test. 
 ```{r}
+# Test on one gene first to verify it works. 
+
 #Combine all the info
 bgc_all_data <- antibac_presabs %>% 
   as_tibble() %>%
@@ -415,22 +329,22 @@ bgc_all_data <- antibac_presabs %>%
   left_join(metadata_bgc, by = c("sample" = "CoralID"))
 
 # Try with just one BGC to test out the Fisher's Exact Test to see that it works
-bgc_test <- bgc_all_data %>%
-  filter(Contig == "k127_2342471") %>%
-  group_by(Fate_after_SP1, pres_abs_words) %>%
-  summarize(count = length(pres_abs_words)) %>%
-  tidyr::spread(Fate_after_SP1, count) %>%
-  dplyr::select(Unaffected, Recovered, `Will be diseased`, Diseased) %>%
-  as.data.frame()
-
-rownames(bgc_test) <- c("Absent", "Present")
-
-# Run the Fisher's exact test - testing the null of independence of rows and columns in the contingency table - null hypothesis - no difference between presence and absence of genes 
-set.seed(100)
-fisher_result <- fisher.test(bgc_test, simulate.p.value = TRUE)
-print(fisher_result)
-
-fisher_result$p.value
+# bgc_test <- bgc_all_data %>%
+#   filter(Contig == "k127_2342471") %>%
+#   group_by(Fate_after_SP1, pres_abs_words) %>%
+#   summarize(count = length(pres_abs_words)) %>%
+#   tidyr::spread(Fate_after_SP1, count) %>%
+#   dplyr::select(Unaffected, Recovered, `Will be diseased`, Diseased) %>%
+#   as.data.frame()
+# 
+# rownames(bgc_test) <- c("Absent", "Present")
+# 
+# # Run the Fisher's exact test - testing the null of independence of rows and columns in the contingency table - null hypothesis - no difference between presence and absence of genes 
+# set.seed(100)
+# fisher_result <- fisher.test(bgc_test, simulate.p.value = TRUE)
+# print(fisher_result)
+# 
+# fisher_result$p.value
 ```
 
 ```{r}
@@ -473,13 +387,13 @@ bgc_p_values_fate <- data.frame(Contig = BGC_fisher_fate_wide$Contig, Adj_P_Valu
   mutate(sig_non_adj = ifelse(P_Value < 0.05, "significant", "not"))
 
 # Print the table - see which genes are different between high and low resistant corals
-print(bgc_p_values_fate)
+# print(bgc_p_values_fate)
 
 # Add the p-values to the antimicrobials table
 antimicrobials_with_pval <- left_join(antimicrobials, bgc_p_values_fate, by = "Contig")
 
 # How many of each type?
-table(antimicrobials$Compound)
+# table(antimicrobials$Compound)
 
 # Which compounds are most prevalent across all corals?
 contig_prev <- data.frame(Contig = rownames(antibac_presabs), 
@@ -488,210 +402,3 @@ contig_prev <- data.frame(Contig = rownames(antibac_presabs),
   arrange(desc(N_coral_present))
 ```
 Cool...looks like none of the biosynthetic gene clusters were significantly differentially prevalent across coral fates. The takeaway there is that corals of all fates harbor the BGCs that encode diverse antimicrobial functions, and while the differential abundance test indicated there was lower abundance of BGCs, it isn't statistically differentially prevalent. These clusters may help both maintain the coral holobiont through production of diverse antimicrobial compounds or even promote infection in diseased corals. 
-
-Before the adjusted p value, there were 2 that were significantly differentially abundant. 
-
-# Strict coverage cutoff
-
-## Mean exploration stricter cutoff
-
-Theres a lot of very low values. Try making presence/absence with anything above 0 being present.
-
-```{r}
-antibac_presabs_1 <- ifelse(antibac > 1, 1, 0)
-```
-
-I will show mean coverage as I think it is a little more intuitive. The idea is that in the sample the reads cover differently sized contigs and it is the amount of the contig that is covered. I am assuming that if any part of a contig is covered (at the threshold set by the program), then it is likely found in that coral holobiont and thus that BGC may be in that coral.
-
-## Heatmap, mean pres/abs
-
-Maybe I can make a heatmap of the different contigs and color them by the health/disease status of the samples and by the grouping of the BCG. And make the presence/absence just black and white.
-
-```{r}
-metadata$CoralID
-colnames(antibac_presabs_1)
-
-# Subset metadata and get it in the same order as the heatmap data
-idx <- match(colnames(antibac_presabs_1), metadata$CoralID)
-metadata_bgc_1 <- metadata[idx, ]
-
-match(metadata_bgc_1$CoralID, colnames(antibac_presabs_1))
-
-# Categorical information (e.g Sample Disease Status)
-annotation_col_1 <- data.frame(
-  Colony_Fate = metadata_bgc_1$Fate_after_SP1)
-rownames(annotation_col_1) <- colnames(antibac_presabs_1)
-
-annotation_col_1$Colony_Fate <- factor(annotation_col_1$Colony_Fate, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
-
-# Custom colors for annotation
-ann_colors <- list(
-  Colony_Fate = c(Unaffected = "#482173", Recovered = "#2e6f8e", `Will be diseased` = "#29af7f", Diseased = "#FFC20A"),
-  Activity_General = c(
-    "antimicrobial" = "#990F26", 
-    "antimicrobial, cytotoxic" = "#CC7A88", 
-    "antimicrobial precursor" = "#99600F",
-    "antimicrobial defense" = "#CCAA7A", 
-    "antibiotic resistance" = "#54990F",
-    "cytotoxic" = "#CFE6B8", 
-    "phytotoxic" = "#3E9FB3",
-    "toxin" = "#B8DEE6",
-    "virulence factor" = "#967ACC"
-  )
-)
-
-# Categorical annotation for rows (e.g. BGC types)
-antimicrobials$Contig
-rownames(antibac_presabs_1)
-
-#antimicrobials$Contig_Compound <- paste0(antimicrobials$Contig," (", antimicrobials$Compound, ")")
-
-# Get the rows to match with the BGC metadata
-idx <- match(rownames(antibac_presabs_1), antimicrobials$Contig)
-bgc_antimicrobial_info_1 <- antimicrobials[idx, ]
-
-# Check it worked
-match(bgc_antimicrobial_info_1$Contig, rownames(antibac_presabs_1))
-
-# Rename the rows of the matrix by the new contig and compound name
-antibac_presabs_forheatmap_1 <- antibac_presabs_1
-rownames(antibac_presabs_forheatmap_1) <- bgc_antimicrobial_info_1$Contig_Compound
-
-# Set annotation levels for contigs (General Activity of BGC)
-annotation_row_1 <- data.frame(
-  Activity_General = bgc_antimicrobial_info_1$Activity_general)
-
-rownames(annotation_row_1) <- rownames(antibac_presabs_forheatmap_1)
-
-annotation_row_1$Activity_General <- factor(annotation_row_1$Activity_General, levels = c("antimicrobial", 
-                                                                          "antimicrobial, cytotoxic", 
-                                                                          "antimicrobial precursor",
-                                                                          "antimicrobial defense", 
-                                                                          "antibiotic resistance",
-                                                                          "cytotoxic", 
-                                                                          "phytotoxic",
-                                                                          "toxin",
-                                                                          "virulence factor"))
-
-# Define a black-to-white color gradient
-bw_colors <- colorRampPalette(c("white", "black"))(10)
-
-# Generate heatmap with colored gene names
-pheatmap(antibac_presabs_forheatmap_1, 
-        annotation_row = annotation_row_1, 
-        annotation_colors = ann_colors,
-        annotation_col = annotation_col_1, 
-        color = bw_colors,
-        cluster_rows = TRUE, cluster_cols = TRUE,
-        clustering_distance_rows = "euclidean", 
-        clustering_distance_cols = "euclidean")
-
-# Save heatmap to PDF
-pdf("../figures/BGC_antimicrobial_heatmap_06.27.26_StrictCutoff1.pdf", width = 13, height = 9)
-pheatmap(antibac_presabs_forheatmap_1, 
-        annotation_row = annotation_row_1, 
-        annotation_colors = ann_colors,
-        annotation_col = annotation_col_1, 
-        color = bw_colors,
-        border_color = "black",
-        cluster_rows = TRUE, cluster_cols = TRUE)
-dev.off()  # Close the PDF device
-```
-
-## Fate - Fisher's Exact Test
-
-I want to see if any of the BGC's were significantly differentially prevalent across Colony Fate. 
-
-I hypothesize that the unaffected and recovered coral samples may have a greater prevalence of BGC's encoding potential antimicrobial or toxic compounds to help support the maintenance of the coral host and protect against infection. This is supported by the differential abundance data. 
-
-Use a fisher's exact test to test that one gene is significantly differentially prevalent between the four colony fates.
-
-A fisher's exact test works with presence/absence data and it also works well with small sample sizes. Since the recovered group is only 4 smaples, this is a better target than the chi squared test. 
-```{r}
-#Combine all the info
-bgc_all_data_1 <- antibac_presabs_1 %>% 
-  as_tibble() %>%
-  mutate(Contig = rownames(antibac_presabs_1)) %>%
-  left_join(antimicrobials, by = "Contig") %>%
-  gather(key = "sample", value = "pres_abs", `1220`:N73) %>%
-  mutate(pres_abs_words = ifelse(pres_abs == 1, "Present", "Absent")) %>%
-  left_join(metadata_bgc_1, by = c("sample" = "CoralID"))
-
-# Try with just one BGC to test out the Fisher's Exact Test to see that it works
-bgc_test_1 <- bgc_all_data_1 %>%
-  filter(Contig == "k127_2342471") %>%
-  group_by(Fate_after_SP1, pres_abs_words) %>%
-  summarize(count = length(pres_abs_words)) %>%
-  tidyr::spread(Fate_after_SP1, count, fill = 0) %>%
-  dplyr::select(Unaffected, Recovered, `Will be diseased`, Diseased) %>%
-  as.data.frame()
-
-rownames(bgc_test_1) <- c("Absent", "Present")
-
-# Run the Fisher's exact test - testing the null of independence of rows and columns in the contingency table - null hypothesis - no difference between presence and absence of genes 
-set.seed(100)
-fisher_result_1 <- fisher.test(bgc_test_1, simulate.p.value = TRUE)
-print(fisher_result_1)
-
-fisher_result_1$p.value
-```
-
-```{r}
-# Create a function to perform Fisher's exact test
-perform_fisher_test <- function(gene_row) {
-  # Create a 2x4 contingency table
-  contingency_table <- matrix(as.integer(gene_row[2:9]), nrow = 2) #make sure the table is an integer
-  
-  # Perform Fisher's exact test - simulate p val with Monte Carlo because bigger than 2x2 table
-  set.seed(100)
-  fisher_result <- fisher.test(contingency_table, simulate.p.value = TRUE)
-  
-  # Return the p-value
-  return(fisher_result$p.value)
-}
-
-BGC_fisher_fate_1 <- bgc_all_data_1 %>%
-  group_by(Contig, Fate_after_SP1, pres_abs_words) %>%
-  summarize(count = length(pres_abs_words), .groups = "drop") %>%
-  mutate(fate_presabs = paste0(Fate_after_SP1,"_",pres_abs_words)) %>%
-  dplyr::select(Contig, count, fate_presabs) %>%
-  as.data.frame() 
-
-bgcs_antimicrobials_1 <- BGC_fisher_fate_1$Contig
-
-BGC_fisher_fate_wide_1 <- BGC_fisher_fate_1 %>%
-  group_by(Contig) %>%
-  dplyr::select(count, fate_presabs) %>%
-  pivot_wider(names_from = fate_presabs, values_from = count, values_fill = 0)
-
-# Apply the function to each row (gene) in the table and perform a multiple test correction
-p_values_fate_1 <- base::apply(BGC_fisher_fate_wide_1, 1, perform_fisher_test)
-
-p_adjusted_BH_fate_1 <- p.adjust(p_values_fate_1, method = "BH")
-
-# Combine gene names and p-values into a table
-bgc_p_values_fate_1 <- data.frame(Contig = BGC_fisher_fate_wide_1$Contig, Adj_P_Value = p_adjusted_BH_fate_1, P_Value = p_values_fate_1) %>% 
-  mutate(significant = ifelse(Adj_P_Value < 0.05, "significant", "not")) %>%
-  mutate(sig_non_adj = ifelse(P_Value < 0.05, "significant", "not"))
-
-# Print the table - see which genes are different between high and low resistant corals
-print(bgc_p_values_fate_1)
-
-# Add the p-values to the antimicrobials table
-antimicrobials_with_pval_1 <- left_join(antimicrobials, bgc_p_values_fate_1, by = "Contig")
-
-# How many of each type?
-table(antimicrobials$Compound)
-
-# Which compounds are most prevalent across all corals?
-contig_prev_1 <- data.frame(Contig = rownames(antibac_presabs_1), 
-                          N_coral_present = rowSums(antibac_presabs_1)) %>%
-  left_join(antimicrobials, by = "Contig") %>%
-  arrange(desc(N_coral_present))
-
-# Look at the raw data for two of the significant taxa to see which fates it is most/least prevalent in
-filter(BGC_fisher_fate_wide_1, Contig %in% c("k127_3355508", "k127_3314053"))
-```
-Cool...looks like with the stricter mean coverage cutoff of 1, now two of the bgcs were significantly differentially prevalent across disease fates: 
-- k127_3355508 (amphotericin B) from Streptomyces nodosus, an antifungal antibiotic
-- k127_3314053 (xenematide) from Xenorhabdus nematophila AN6/1, an antimicrobial compound
