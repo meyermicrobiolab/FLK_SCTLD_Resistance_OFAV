@@ -194,7 +194,7 @@ ggplot(BGC_data,
         plot.title = element_text(size=20, face="bold"))
 ```
 
-<img src="../figures/fig-unnamed-chunk-3-1.png" width="672" />
+<img src="../figures/fig-bgc_alluvial-1.png" width="672" />
 
 ``` r
 #ggsave("../figures/BGC_alluvial_8.12.25.pdf", width = 9, height = 12)
