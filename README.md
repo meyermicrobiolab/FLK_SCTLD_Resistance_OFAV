@@ -6,7 +6,7 @@ Scripts and R code to reproduce bioinformatics and data analysis workflows for t
 
 ## Instructions to Reproduce Figures & Analysis
 * Download data files from Zenodo: https://doi.org/10.5281/zenodo.17947166
-* [Figure 1 - Alluvial plot.](https://github.com/meyermicrobiolab/FLK_SCTLD_Resistance_OFAV/blob/main/analysis_code/Fig1_metadata.md) Code additionally covers content in Figure S3.
+* [Figure 2 - Alluvial plot.](https://github.com/meyermicrobiolab/FLK_SCTLD_Resistance_OFAV/blob/main/analysis_code/Fig1_metadata.md) Code additionally covers content in Figure S3.
 * [Figure 3 - Beta diversity analysis.](https://github.com/meyermicrobiolab/FLK_SCTLD_Resistance_OFAV/blob/main/analysis_code/BetaDiversity.md) Code additionally covers content in Figure S2, Figure S4, Figure S5, and Table S4.
 * [Figure 4 - Differential abundance analysis.](https://github.com/meyermicrobiolab/FLK_SCTLD_Resistance_OFAV/blob/main/analysis_code/Fig3_differential_abundance.md) Code additionally covers content in Table S5.
 * [Figure 5 - Antibiotic resistance gene analysis.](https://github.com/meyermicrobiolab/FLK_SCTLD_Resistance_OFAV/blob/main/analysis_code/AMR_analysis.md) Code additionally covers content in Table S6 and Figure S7.
