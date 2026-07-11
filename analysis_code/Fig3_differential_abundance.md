@@ -11,15 +11,13 @@ output:
     theme: united
 ---
 
-```{r setup, echo=FALSE}
-knitr::opts_chunk$set(echo = TRUE, fig.retina = 2, fig.path = "../figures/fig-diffabund")
-setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
-```
+
 
 # Setup
 ## Install necessary packages
 
-```{r packages, message=FALSE, warning=FALSE, results='hide'}
+
+``` r
 # For data wrangling
 library(dplyr)
 library(tidyr)
@@ -45,7 +43,8 @@ I want to analyze the differentially abunant genes of only annotated (by KEGG) t
 I recently re-ran Salmon to get gene abundances on all the prokaryote genes. The prokaryote genes were identified using EukRep. EukRep split the coassembly into prok and euk fractions. I then got predicted genes from prodigal (output both AA and nucleotide seqs). I took the prok fraction of predicted genes (nucleotide) and re-mapped the noneuk reads on the prok genes to get gene abundances. That is what I am now re-running all the PCA analyses on. I am interested in how genes differ by colony fate when controlling for zoox composition. 
 
 ## Data 
-```{r}
+
+``` r
 # Load table with count abundances from salmon ("numreads")
 prokreads <- read.table("../data/FLK_OFAV_MG_prok_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
 prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
@@ -59,7 +58,15 @@ prokreads_nozero <- prokreads[rowSums(prokreads) != 0, ]
 
 # any samples with no reads? No.
 table(colSums(prokreads_nozero) == 0)
+```
 
+```
+## 
+## FALSE 
+##    41
+```
+
+``` r
 # Fix the sample names bc R doesn't like column names that start with a number
 colnames(prokreads_nozero) <- str_replace_all(colnames(prokreads_nozero), pattern = "[X]", "")
 colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
@@ -69,7 +76,8 @@ prok_taxa <- read.table("../data/FLK_OFAV_MG_prok_coassembly_tax_mmseqs2.tsv", h
 ```
 
 ### Parse KO data
-```{r message=FALSE, warning=FALSE, results='hide'}
+
+``` r
 # load KO and Gene ids
 # Read all lines from the file
 lines <- readLines("../data/user_ko.txt")
@@ -140,7 +148,8 @@ rownames(unique_gene_ko_annotated) <- unique_gene_ko_annotated[,"geneID"]
 
 ## Phyloseq object
 Start with a phyloseq object jsut with the count data (no annotation information). The annotations aren't needed for the PCAs I want to make. 
-```{r}
+
+``` r
 ## Make phyloseq object of count-related data 
 idx <- match(colnames(prokreads_nozero), rownames(metadata))
 metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced samples
@@ -153,13 +162,21 @@ ps.prok.annotated <- phyloseq(NUMREADS, META, FXN)
 ps.prok.annotated
 ```
 
+```
+## phyloseq-class experiment-level object
+## otu_table()   OTU Table:         [ 31695 taxa and 41 samples ]
+## sample_data() Sample Data:       [ 41 samples by 40 sample variables ]
+## tax_table()   Taxonomy Table:    [ 31695 taxa by 12 taxonomic ranks ]
+```
+
 # Differential Abundance Analysis
 
 ## Corncob
 
 I would like to analyze the Colony fate category. This time, I will use that, and again control for zoox. 
 
-```{r}
+
+``` r
 ## Set levels
 sample_data(ps.prok.annotated)$Fate_after_SP1 <-
   factor(sample_data(ps.prok.annotated)$Fate_after_SP1, 
@@ -189,7 +206,8 @@ prok.da.fate <- differentialTest(formula = ~ Fate_after_SP1 + Zoox_composition_N
 Looks like there are 392 differentially abundant genes by different categories! I'll dig into these to see how best to represent these different groupings. 
 
 Save all the data. 
-```{r}
+
+``` r
 # write a function to extract the corncob results
 extractmods3 <- function(model) {
   result <- data.frame("Estimate" = model$coefficients[2:4, 1], 
@@ -221,7 +239,8 @@ sig.models.df.fate <- plyr::ldply(sig.models.fate, data.frame) %>%
 ## Process output
 
 How many different genes are there significant at a adjusted p value < 0.001?
-```{r results='hide'}
+
+``` r
 filter(sig.models.df.fate, p < 0.001) #162 comparisons
 filter(sig.models.df.fate, Estimate > 0) #536 comparisons 
 filter(sig.models.df.fate, Estimate < 0) #640 comparisons
@@ -237,7 +256,8 @@ sig.taxa.fate <- sig.models.df.fate$KO %>% unique
 I will manipulate the data table output so that I can get a table that shows the KEGG Orthology information clearly.
 
 Loop through a bunch of KO ids. I will loop through all the KO IDs and get them combined. 
-```{r results='hide'}
+
+``` r
 # List of KO identifiers
 ko_ids.fate <- readLines("sig.taxa.KO.fate.txt")
 
@@ -382,7 +402,8 @@ Now, the `parsed_data.fate` data frame is the BRITE hierarchy data for the signi
 
 Then, I will make a data table of the estimates and make a figure of the corncob results. I will subset only of the KEGG Orthology annotations. Then I will focus on specifically metabolism-based KEGG Orthology annotations since those have an ecological function more than things like "DNA repair" or similar. 
 
-```{r message=FALSE, warning=FALSE}
+
+``` r
 KEGG_Orthology_sig_ko.fate <- parsed_data.fate %>%
   filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
   filter(Level2 == "09100 Metabolism")
@@ -392,12 +413,62 @@ parsed_data.fate %>%
   filter(BRITEhierarchy != "KEGG Orthology (KO) [BR:ko00001]") %>%
   dplyr::select(BRITEhierarchy) %>%
   unique
- 
+```
+
+```
+##                                                       BRITEhierarchy
+## 1                                 Transcription factors [BR:ko03000]
+## 2                                               Enzymes [BR:ko01000]
+## 3                              DNA replication proteins [BR:ko03032]
+## 4                 DNA repair and recombination proteins [BR:ko03400]
+## 6                            Amino acid related enzymes [BR:ko01007]
+## 7                               Transfer RNA biogenesis [BR:ko03016]
+## 9                                          Transporters [BR:ko02000]
+## 11                                             Ribosome [BR:ko03011]
+## 19                   Chromosome and associated proteins [BR:ko03036]
+## 21                                  Ribosome biogenesis [BR:ko03009]
+## 24                                              Exosome [BR:ko04147]
+## 28                            Peptidases and inhibitors [BR:ko01002]
+## 30                     Chaperones and folding catalysts [BR:ko03110]
+## 31                                     Secretion system [BR:ko02044]
+## 36                              Transcription machinery [BR:ko03021]
+## 49                                  Translation factors [BR:ko03012]
+## 51                             Mitochondrial biogenesis [BR:ko03029]
+## 54                              Photosynthesis proteins [BR:ko00194]
+## 59                                 Glycosyltransferases [BR:ko01003]
+## 65                           Prokaryotic defense system [BR:ko02048]
+## 67                                Cytoskeleton proteins [BR:ko04812]
+## 70                                      Protein kinases [BR:ko01001]
+## 71                                 Two-component system [BR:ko02022]
+## 77  Peptidoglycan biosynthesis and degradation proteins [BR:ko01011]
+## 79         Protein phosphatases and associated proteins [BR:ko01009]
+## 112                         Lipid biosynthesis proteins [BR:ko01004]
+## 125                            Messenger RNA biogenesis [BR:ko03019]
+## 136                                Membrane trafficking [BR:ko04131]
+## 192                      Antimicrobial resistance genes [BR:ko01504]
+## 214                         Bacterial motility proteins [BR:ko02035]
+## 339                                    Bacterial toxins [BR:ko02042]
+## 500                                  Prenyltransferases [BR:ko01006]
+```
+
+``` r
 #did i capture all the KOs? NO - only 165 out of all of them
 KEGG_Orthology_sig_ko.fate$KO %>% unique %>% length
+```
 
+```
+## [1] 165
+```
+
+``` r
 parsed_data.fate$KO %>% unique %>% length
+```
 
+```
+## [1] 356
+```
+
+``` r
 # For each of the KO identifiers, match the gene ID and the associated abundance to that KO. There are multiple duplicate annotations for each KO, and duplicate genes that match a KO, so it is going to be a bit of an "all against all" match up. I also want to add the taxonomy results. 
 sig.ko.tax.data.fate <- sig.models.df.fate %>%
   dplyr::select(.id:NAME, DBLINKS, annotation, complete_classification) %>%
@@ -418,7 +489,8 @@ Additionally, since I did a corncob test with multiple levels, I am not sure I w
 
 I want to show the metabolism-based results. I will plot the coefficient since that reflects how much something increased or decreased in the different conditions. 
 
-```{r metabolism graph}
+
+``` r
 # How many genes have a Metabolism function? 180
 sig.ko.tax.data.fate %>% 
   filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
@@ -426,7 +498,13 @@ sig.ko.tax.data.fate %>%
   dplyr::select(.id) %>%
   unique %>% 
   nrow
+```
 
+```
+## [1] 180
+```
+
+``` r
 # How many KO ids have a Metabolism function? 165
 sig.ko.tax.data.fate %>% 
   filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
@@ -434,7 +512,13 @@ sig.ko.tax.data.fate %>%
   dplyr::select(KO) %>%
   unique %>% 
   nrow
+```
 
+```
+## [1] 165
+```
+
+``` r
 # Subset genes with metabolism annotations - need to facet with the different categories...
 sig.metab.genes.fate <- sig.ko.tax.data.fate %>% 
   filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
@@ -454,8 +538,26 @@ summary_table <- sig.metab.genes.fate %>%
 print(summary_table)
 ```
 
+```
+## # A tibble: 31 × 4
+##    Level3                        Comparison                   negative positive
+##    <chr>                         <fct>                           <int>    <int>
+##  1 09101 Carbohydrate metabolism Unaffected_vs_Recovered            NA       19
+##  2 09101 Carbohydrate metabolism Unaffected_vs_WillbeDiseased        7        1
+##  3 09101 Carbohydrate metabolism Unaffected_vs_Diseased             23        7
+##  4 09102 Energy metabolism       Unaffected_vs_Recovered             3        7
+##  5 09102 Energy metabolism       Unaffected_vs_WillbeDiseased        6        1
+##  6 09102 Energy metabolism       Unaffected_vs_Diseased             24        3
+##  7 09103 Lipid metabolism        Unaffected_vs_Recovered            NA        1
+##  8 09103 Lipid metabolism        Unaffected_vs_WillbeDiseased        1       NA
+##  9 09103 Lipid metabolism        Unaffected_vs_Diseased              9       NA
+## 10 09104 Nucleotide metabolism   Unaffected_vs_Recovered             1        5
+## # ℹ 21 more rows
+```
+
 Subset genes w/ taxonomy
-```{r}
+
+``` r
 # Subset the DA genes to those that are involved in secondary metabolite or vitamin production
 sig.metab.genes.fate.subsetforgraph.vits <- sig.metab.genes.fate %>%
   filter(significant == TRUE) %>%
@@ -471,11 +573,17 @@ sig.metab.genes.fate.subsetforgraph.vits.tax <- sig.metab.genes.fate.subsetforgr
            sep = "[;]", remove = FALSE)
 ```
 
+```
+## Warning: Expected 7 pieces. Missing pieces filled with `NA` in 19 rows [6, 12, 13, 22,
+## 24, 36, 39, 40, 51, 52, 53, 56, 57, 61, 64, 65, 66, 67, 73].
+```
+
 ## Non-metabolism results
 
 It looks like 180 out of the 392 genes were involved in metabolism functions. What about the other half? I am going to go through and assess and graph the other genes. First, I need to subset the data to only look at the remaining genes. 
 
-```{r}
+
+``` r
 # Get a list of all the genes from the first graph
 metab.genes.fate.id <- sig.metab.genes.fate$.id %>% unique
 
@@ -484,7 +592,13 @@ sig.nonmetab.genes.fate <- sig.ko.tax.data.fate[!sig.ko.tax.data.fate$.id %in% m
 
 # Double check how many unique genes in the new data frame (212 - good! adds up to 392 with 180)
 sig.nonmetab.genes.fate$.id %>% unique %>% length
+```
 
+```
+## [1] 212
+```
+
+``` r
 # Subset the KO data since it includes all 179 genes
 sig.nonmetab.genes.fate.KO <- sig.nonmetab.genes.fate %>% 
   filter(BRITEhierarchy == "KEGG Orthology (KO) [BR:ko00001]") %>%
@@ -503,10 +617,28 @@ summary_table_nonmetab <- sig.nonmetab.genes.fate.KO %>%
 print(summary_table_nonmetab)
 ```
 
+```
+## # A tibble: 60 × 4
+##    Level3                                 Comparison           negative positive
+##    <chr>                                  <fct>                   <int>    <int>
+##  1 09121 Transcription                    Unaffected_vs_Recov…       NA        2
+##  2 09121 Transcription                    Unaffected_vs_Willb…       NA        1
+##  3 09121 Transcription                    Unaffected_vs_Disea…        1        2
+##  4 09122 Translation                      Unaffected_vs_Recov…        1        3
+##  5 09122 Translation                      Unaffected_vs_Willb…        7       NA
+##  6 09122 Translation                      Unaffected_vs_Disea…       18       NA
+##  7 09123 Folding, sorting and degradation Unaffected_vs_Recov…        2        4
+##  8 09123 Folding, sorting and degradation Unaffected_vs_Willb…        3       NA
+##  9 09123 Folding, sorting and degradation Unaffected_vs_Disea…       12        1
+## 10 09124 Replication and repair           Unaffected_vs_Recov…        2        4
+## # ℹ 50 more rows
+```
+
 Many of the differentially abundant genes that I would hypothesize are playing a role in microbial-based disease susceptibility or resilience are in the Environmental Information Processing, Cellular processes, Drug resistance, and protein families, signalling and cellular processes groups. I will make a graph with just those categories. I will ignore the human disease ones because I anticipate those are relevant to human pathogens, which I don't think would be abundant on the reefs. 
 
 Subset non-metabolism genes w/ taxonomy
-```{r}
+
+``` r
 # Include groups 
 sig.nonmetab.genes.fate.KO.subsetforgraph <- sig.nonmetab.genes.fate.KO %>%
   filter(Level3 %in% c("09131 Membrane transport",
@@ -524,12 +656,18 @@ sig.nonmetab.genes.fate.KO.subsetforgraph.tax <- sig.nonmetab.genes.fate.KO.subs
            sep = "[;]", remove = FALSE)
 ```
 
+```
+## Warning: Expected 7 pieces. Missing pieces filled with `NA` in 29 rows [40, 41, 42, 43,
+## 47, 49, 50, 51, 52, 53, 54, 55, 75, 79, 104, 105, 106, 109, 110, 111, ...].
+```
+
 
 # Figure 4
 
 Genes involved in metabolism of secondary metabolites and other natural products, as well as those involved in signal transduction and cellular processes were less abundant in diseased and corals that will be diseased categories as compared to unaffected colonies, but enriched in corals recovered from SCTLD (Corncob, Benjamini-Hochberg false discovery rate corrected p < 0.05). The differential abundance coefficient represents how much the modeled relative abundance of a gene was enriched or depleted relative to the baseline (unaffected colonies, dotted line at zero). Error bars reflect 95% confidence intervals around the coefficient. Results are organized by KEGG hierarchy, with the top panel representing metabolism genes, and the bottom panel representing all other processes. There are some points (genes) that are repeated due to their involvement in multiple pathways and roles. The color represents the family and phylum-level annotations for a given predicted gene from the GTDB database. These differentially abundant genes are a subset of all. See Table S6 for a list of all 392 genes and the comparisons for which they were significantly differentially abundant. 
 
-```{r DA}
+
+``` r
 # Metabolism genes subset
 c <- ggplot(sig.metab.genes.fate.subsetforgraph.vits.tax, aes(x = Estimate, y = Level4)) +
   geom_errorbar(aes(xmin = Estimate-Std.Error, xmax = Estimate+Std.Error), width = 0.2, color = "gray") +
@@ -553,8 +691,11 @@ d <- ggplot(sig.nonmetab.genes.fate.KO.subsetforgraph.tax, aes(x = Estimate, y =
 wrap_plots(c,d, nrow = 2, heights = c(1.3,1), axis_titles = "collect")
 ```
 
+<img src="../figures/fig-diffabundDA-1.png" width="672" />
+
 # Table S5
-```{r results='hide'}
+
+``` r
 sig.metab.genes.fate.subsetforgraph.vits.tax
 sig.nonmetab.genes.fate.KO.subsetforgraph.tax
 
