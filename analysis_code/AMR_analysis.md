@@ -11,15 +11,13 @@ output:
     theme: united
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, fig.retina = 2, fig.path = "../figures/fig-ARG")
-setwd("~/Documents/GitHub/FLK_SCTLD_Resistance_OFAV/")
-```
+
 
 # Setup
 ## Install necessary packages
 
-```{r packages, message=FALSE, warning=FALSE, results='hide'}
+
+``` r
 # For data wrangling
 library(dplyr)
 library(tidyr)
@@ -48,7 +46,8 @@ library(RColorBrewer)
 ## Load raw data 
 
 First read in the RGI data table. Note, the table that came from the RGI program was kinda tough in the first column. So I changed the first column to have just the contig/gene ID, then got rid of the empty columns (Contig, start, stop, orientation). I also got rid of teh SNPs column and predicted_DNA columns. I also just tried saving it as an Excel document to see if it works better. 
-```{r}
+
+``` r
 amr <- read_excel("../data/FLK_prok_coassembly_RGI_AMR.xlsx")
 
 # Make a short ID that corresponds to the AMR gene family name 
@@ -61,8 +60,15 @@ amr.new <- amr %>%
 table(amr.new$AMR_Gene_Family_ID == "NA")
 ```
 
+```
+## 
+##  FALSE 
+## 200100
+```
+
 Need to read in the count, taxonomy, and metadata data for each gene. 
-```{r}
+
+``` r
 # Load table with count abundances from salmon ("numreads")
 prokreads <- read.table("../data/FLK_OFAV_MG_prok_coassembly_salmon_quant_all_NumReads.tsv", header = TRUE, sep = "\t", row.names = 2)
 prokreads <- prokreads[, -1] # get rid of the first column cause it is just numbered lines
@@ -73,14 +79,36 @@ rownames(metadata) <- metadata$CoralID
 
 # how many genes are zero across all samples? Like 32k
 table(rowSums(prokreads) == 0)
+```
 
+```
+## 
+##  FALSE   TRUE 
+## 247254  32686
+```
+
+``` r
 # remove them
 prokreads_nozero <- prokreads[rowSums(prokreads) != 0, ]
 dim(prokreads_nozero)
+```
 
+```
+## [1] 247254     41
+```
+
+``` r
 # any samples with no reads? No.
 table(colSums(prokreads_nozero) == 0)
+```
 
+```
+## 
+## FALSE 
+##    41
+```
+
+``` r
 # Fix the sample names bc R doesn't like column names that start with a number
 colnames(prokreads_nozero) <- str_replace_all(colnames(prokreads_nozero), pattern = "[X]", "")
 colnames(prokreads_nozero) <- str_split_i(colnames(prokreads_nozero), "[_]", 1)
@@ -94,25 +122,89 @@ metadata_prok <- metadata[idx,] # subset the metadata to only the sequenced samp
 ```
 
 Generate some summary statistics regarding the different AMR categories of all 200,000 hits
-```{r}
+
+``` r
 amr %>% 
   dplyr::count(Model_type)
+```
 
+```
+## # A tibble: 3 × 2
+##   Model_type                        n
+##   <chr>                         <int>
+## 1 protein homolog model        196773
+## 2 protein overexpression model   1976
+## 3 protein variant model          1351
+```
+
+``` r
 amr %>% 
   dplyr::count(Cut_Off)
+```
 
+```
+## # A tibble: 2 × 2
+##   Cut_Off      n
+##   <chr>    <int>
+## 1 Loose   200051
+## 2 Strict      49
+```
+
+``` r
 x <- amr %>% 
   dplyr::count(Resistance_Mechanism) 
 
 amr %>% 
   dplyr::count(Drug_Class)
+```
 
+```
+## # A tibble: 157 × 2
+##    Drug_Class                                                                  n
+##    <chr>                                                                   <int>
+##  1 aminocoumarin antibiotic                                                 1380
+##  2 aminoglycoside antibiotic                                               17596
+##  3 aminoglycoside antibiotic; aminocoumarin antibiotic                       670
+##  4 aminoglycoside antibiotic; cephalosporin; cephamycin; penam              1114
+##  5 aminoglycoside antibiotic; polyamine antibiotic; isoniazid-like antibi…     1
+##  6 aminoglycoside antibiotic; tetracycline antibiotic; diaminopyrimidine …   113
+##  7 aminoglycoside antibiotic; tetracycline antibiotic; phenicol antibiotic    73
+##  8 antibacterial free fatty acids                                            388
+##  9 bicyclomycin-like antibiotic                                              159
+## 10 carbapenem                                                              10073
+## # ℹ 147 more rows
+```
+
+``` r
 amr %>% 
   dplyr::count(AMR_Gene_Family)
+```
 
+```
+## # A tibble: 438 × 2
+##    AMR_Gene_Family                        n
+##    <chr>                              <int>
+##  1 16S rRNA methyltransferase (A1408)   186
+##  2 16S rRNA methyltransferase (G1405)  1249
+##  3 AAC(2')                              831
+##  4 AAC(3)                              1918
+##  5 AAC(6')                             3005
+##  6 AAC(6'); AAC(6')-Ib-cr                90
+##  7 AAK beta-lactamase                    52
+##  8 ACC beta-lactamase                   350
+##  9 ACI beta-lactamase                   137
+## 10 ACT beta-lactamase                   828
+## # ℹ 428 more rows
+```
+
+``` r
 # How many unique genes had AMR "hits"
 
 amr$ORF_ID %>% unique %>% length
+```
+
+```
+## [1] 200100
 ```
 
 
@@ -123,7 +215,8 @@ amr$ORF_ID %>% unique %>% length
 
 A whopping 129,772 AMR genes don't have a taxonomic ID. I will remove those to get a better look at what taxa are making up the classified AMR genes. 
 
-```{r}
+
+``` r
 amr.ps <- amr %>% 
   dplyr::select(ORF_ID, Cut_Off, Best_Hit_ARO, Drug_Class, Resistance_Mechanism, AMR_Gene_Family) %>%
   as.matrix
@@ -137,7 +230,15 @@ amr.tax <- amr %>%
            into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
            sep = "[;]", remove = TRUE) %>%
   as.matrix
+```
 
+```
+## Warning: Expected 7 pieces. Missing pieces filled with `NA` in 16870 rows [29, 39, 40,
+## 60, 94, 95, 136, 141, 148, 149, 206, 207, 219, 221, 224, 256, 272, 290, 291,
+## 292, ...].
+```
+
+``` r
 rownames(amr.ps) <- amr.ps[,1]
 rownames(amr.tax) <- amr.tax[,1]
 
@@ -150,7 +251,8 @@ AMR = tax_table(amr.tax)
 ps.amr <- phyloseq(NUMREADS, META, AMR)
 ```
 
-```{r}
+
+``` r
 ps.amr.taxfix <- ps.amr %>%
   transmute_tax_table(Resistance_Mechanism, AMR_Gene_Family, Best_Hit_ARO, ORF_ID) %>%
   tax_fix()
@@ -163,14 +265,23 @@ rest.mech <- ps.amr.taxfix %>%
                facet_by = "Condition_At_Sampling") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   labs(x = "Coral Colony ID", fill = "Resistance Mechanism")
+```
 
+```
+## Registered S3 method overwritten by 'seriation':
+##   method         from 
+##   reorder.hclust vegan
+```
+
+``` r
 #rest.mech
 #tax_table(ps.amr.taxfix)[,1] %>% unique
 ```
 
 ## Fig S7b - ARG Gene Family
 
-```{r results='hide'}
+
+``` r
 # Make a new phyloseq object with the unique AMR gene family IDs
 amr.ps.new <- amr.new %>% 
   dplyr::select(AMR_Gene_Family, AMR_Gene_Family_ID, ORF_ID) %>%
@@ -255,16 +366,40 @@ summary(rel_abund_per_sample_genefams)
 
 ## Fig S7c - Beta-lactamases
 
-```{r}
-amr.new$AMR_Gene_Family %>% head
 
+``` r
+amr.new$AMR_Gene_Family %>% head
+```
+
+```
+## [1] "major facilitator superfamily (MFS) antibiotic efflux pump"      
+## [2] "lipid A phosphatase"                                             
+## [3] "GOB beta-lactamase"                                              
+## [4] "chloramphenicol acetyltransferase (CAT)"                         
+## [5] "resistance-nodulation-cell division (RND) antibiotic efflux pump"
+## [6] "MCR phosphoethanolamine transferase"
+```
+
+``` r
 betalactamases <- amr.new[grep("beta-lactamase", amr.new$AMR_Gene_Family), ]
 
 betalactamases$AMR_Gene_Family %>% unique %>% length
+```
+
+```
+## [1] 253
+```
+
+``` r
 dim(betalactamases)
 ```
+
+```
+## [1] 53467    17
+```
 In addition, I want to make a stacked bar plot of only the beta-lactamase genes. What are the different types that are most abundant in the dataset?
-```{r}
+
+``` r
 # Make a new phyloseq object with the unique AMR gene family IDs
 bl.new <- betalactamases %>% 
   dplyr::select(AMR_Gene_Family, AMR_Gene_Family_ID, ORF_ID) %>%
@@ -274,8 +409,21 @@ bl.new <- betalactamases %>%
 
 # How many total gene families and total beta lactamases
 bl.new[,1] %>% unique %>% length
-bl.new %>% dim()
+```
 
+```
+## [1] 253
+```
+
+``` r
+bl.new %>% dim()
+```
+
+```
+## [1] 53467     3
+```
+
+``` r
 rownames(bl.new) <- bl.new[,3]
 
 prokreads_nozero$Genes <- NULL
@@ -319,7 +467,13 @@ bl_top15_ps <- prune_taxa(top15_bl, bl_relabund)
 # Sum their total relative abundance across all samples
 top15_bl_total_rel_abund <- sum(taxa_sums(bl_top15_ps)) / sum(taxa_sums(bl_relabund))
 top15_bl_total_rel_abund
+```
 
+```
+## [1] 0.3928754
+```
+
+``` r
 # Sample-specific relative abundances
 sample_sums_top15_bl <- sample_sums(prune_taxa(top15_bl, bl_relabund))
 sample_sums_total_bl <- sample_sums(bl_relabund)
@@ -328,13 +482,23 @@ rel_abund_per_sample_bl <- sample_sums_top15_bl / sample_sums_total_bl
 summary(rel_abund_per_sample_bl)
 ```
 
+```
+##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+##  0.2398  0.3657  0.4091  0.3929  0.4328  0.4614
+```
+
 # Figure S7
 
 The coral “resistome” included approximately 200,000 potential antibiotic resistance genes (ARGs) across all coral samples, including over 50,000 beta-lactamase genes. a) The ARGs fell into a variety of resistance mechanisms. The top eight resistance mechanisms are shown, and “Other resistance mechanism” includes five different mechanisms or a combination of mechanisms. b) Diverse ARG families make up the coral resistome. The top 15 most common gene families are displayed. The “Other Gene Family” category includes the remaining 422 different gene families. c) The relative abundance of the top 15 most abundant beta-lactamase genes make up less than 46% of all beta-lactamase genes. The remaining “Other beta-Lactamase gene family” category includes 238 families. 
 
-```{r suppARG}
-wrap_plots(rest.mech, genefam, blactams, nrow = 3, axis_titles = "collect_x")
 
+``` r
+wrap_plots(rest.mech, genefam, blactams, nrow = 3, axis_titles = "collect_x")
+```
+
+<img src="../figures/fig-ARGsuppARG-1.png" width="672" />
+
+``` r
 #ggsave("../figures/AMR_all_betalactams_stacked_bar_08.07.25.pdf", width = 12, height = 15)
 ```
 
@@ -347,7 +511,8 @@ There are 53,467 genes that are classified as beta-lactamases in the dataset. Th
 Examine the hypothesis that as amoxicillin treatment increases, there is an increasing diversity of beta-lactamase genes. 
 
 Use breakaway to test the richness estimation and covariates
-```{r}
+
+``` r
 # Change levels
 sample_data(bl.psobj)$Condition_At_Sampling <- factor(sample_data(bl.psobj)$Condition_At_Sampling, levels = c("Apparently Healthy", "Actively Diseased"))
 
@@ -380,22 +545,61 @@ combined_richness.bl <- meta.bl %>%
 bt_disease_fixed <- betta(formula = estimate ~ Fate_after_SP1, 
                       ses = error, data = combined_richness.bl)
 bt_disease_fixed$table
+```
 
+```
+##                                Estimates Standard Errors p-values
+## (Intercept)                    12993.014        1052.548    0.000
+## Fate_after_SP1Recovered        -1550.471        3331.511    0.642
+## Fate_after_SP1Will be diseased -1720.880        2223.975    0.439
+## Fate_after_SP1Diseased          1929.916        1522.046    0.205
+```
+
+``` r
 # Test for an impact of treatments on richness - scaled by size
 bt_treatments_fixed <- betta(formula = estimate ~ Estimated_Num_treatments_Per_sq_m, 
                       ses = error, data = combined_richness.bl)
 bt_treatments_fixed$table
+```
 
+```
+##                                     Estimates Standard Errors p-values
+## (Intercept)                       12810.69818       1052.5485    0.000
+## Estimated_Num_treatments_Per_sq_m    12.66189         35.0515    0.718
+```
+
+``` r
 # Test for an impact of treatments on richness
 bt_treatments_fixed <- betta(formula = estimate ~ Number_treatments_PreSampling, 
                       ses = error, data = combined_richness.bl)
 bt_treatments_fixed$table
+```
 
+```
+##                                  Estimates Standard Errors p-values
+## (Intercept)                   12687.433561     1052.548456     0.00
+## Number_treatments_PreSampling     3.079189        4.677442     0.51
+```
+
+``` r
 # Test for an impact of treatment history (recent = <2 months, versus a while ago)
 bt_treatments_fixed <- betta(formula = estimate ~ Treatment_History, 
                       ses = error, data = combined_richness.bl)
 bt_treatments_fixed$table
+```
 
+```
+##                                               Estimates Standard Errors
+## (Intercept)                                 12944.41816        1052.548
+## Treatment_HistoryTreatment >2 months           39.11397        1830.025
+## Treatment_HistoryRecent treatment <2 months  1411.79509        1841.125
+##                                             p-values
+## (Intercept)                                    0.000
+## Treatment_HistoryTreatment >2 months           0.983
+## Treatment_HistoryRecent treatment <2 months    0.443
+```
+
+``` r
 # Plot estimated richness 
 richness <- ggplot(combined_richness.bl, aes(x = Number_treatments_PreSampling, y = estimate)) +
   geom_point(size = 4, aes(fill = Treatment_History,
@@ -417,12 +621,28 @@ combined_richness.bl.recenttreat <- combined_richness.bl %>%
 bt_treatments_fixed <- betta(formula = estimate ~ Number_treatments_PreSampling, 
                       ses = error, data = combined_richness.bl.recenttreat)
 bt_treatments_fixed$table
+```
 
+```
+##                                  Estimates Standard Errors p-values
+## (Intercept)                   1.396703e+04     1825.330865    0.000
+## Number_treatments_PreSampling 7.839404e-01        4.663141    0.866
+```
+
+``` r
 # Test for an impact of treatments on richness - scaled by size
 bt_treatments_fixed <- betta(formula = estimate ~ Estimated_Num_treatments_Per_sq_m, 
                       ses = error, data = combined_richness.bl)
 bt_treatments_fixed$table
+```
 
+```
+##                                     Estimates Standard Errors p-values
+## (Intercept)                       12810.69818       1052.5485    0.000
+## Estimated_Num_treatments_Per_sq_m    12.66189         35.0515    0.718
+```
+
+``` r
 #plot - negative results there too
 # ggplot(combined_richness.bl.recenttreat, aes(x = Total_treatments_before_coring, y = estimate)) +
 #   geom_point(size = 4, aes(fill = Treatment_History,
@@ -433,7 +653,8 @@ bt_treatments_fixed$table
 #   scale_fill_manual(values = c("#7F0000"))
 ```
 ## Fig 5c
-```{r results='hide'}
+
+``` r
 bl.tax <- betalactamases %>% 
   left_join(prok_taxa, by = c("ORF_ID" = "contig")) %>%
   dplyr::select(ORF_ID, Cut_Off, Best_Hit_ARO, Drug_Class, Resistance_Mechanism, AMR_Gene_Family, annotation, complete_classification) %>%
@@ -441,7 +662,15 @@ bl.tax <- betalactamases %>%
            into = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), 
            sep = "[;]", remove = TRUE) %>%
   as.data.frame()
+```
 
+```
+## Warning: Expected 7 pieces. Missing pieces filled with `NA` in 4205 rows [18, 29, 31,
+## 52, 53, 54, 76, 124, 125, 142, 153, 156, 159, 162, 198, 214, 225, 234, 246,
+## 250, ...].
+```
+
+``` r
 #write.table(bl.tax, "../data/beta-lactamase_AMR.txt", sep="\t", row.names = FALSE, col.names = TRUE)
 
 bl.tax %>% head
@@ -487,7 +716,8 @@ betalactam.tax <- ggplot(plotting_class, aes(x = "", y = new_n, fill = Class)) +
 
 ## Figure 5b
 
-```{r}
+
+``` r
 NUMREADS = otu_table(prokreads_nozero, taxa_are_rows = TRUE)
 META = sample_data(metadata_prok)
 AMR = tax_table(as.matrix(bl.tax))
@@ -495,8 +725,17 @@ AMR = tax_table(as.matrix(bl.tax))
 ps.amr.bl <- phyloseq(NUMREADS, META, AMR)
 ps.amr.bl
 ```
+
+```
+## phyloseq-class experiment-level object
+## otu_table()   OTU Table:          [ 47892 taxa and 41 samples ]:
+## sample_data() Sample Data:        [ 41 samples by 40 sample variables ]:
+## tax_table()   Taxonomy Table:     [ 47892 taxa by 14 taxonomic ranks ]:
+## taxa are rows
+```
 Prep data for the plot
-```{r}
+
+``` r
 # transform the data using centered log-ratio transformations
 ps.amr.bl_clr <- microbiome::transform(ps.amr.bl, 'clr')
 
@@ -520,7 +759,8 @@ Some important variables:
 - Estimated_Num_treatments_Per_sq_m (scaled to size, which makes the treatments a bit more comparable across colonies)
 - Number_treatments_PreSampling (treatments leading up to the sampling in May/June 2021)
 - Colony fate = what did the colony end up doing (potentially related to treatments)
-```{r}
+
+``` r
 metadata_prok$Fate_after_SP1 <- factor(metadata_prok$Fate_after_SP1, levels = c("Unaffected", "Recovered", "Will be diseased", "Diseased"))
 
 sample_data(ps.amr.bl_clr)$Treatment_History <- factor(sample_data(ps.amr.bl_clr)$Treatment_History, levels = c("No Treatment", "Treatment >2 months", "Recent treatment <2 months"))
@@ -532,6 +772,16 @@ amr_pca <- plot_ordination(ps.amr.bl_clr, ps.amr.bl_clr_euc, type="samples",
   coord_fixed()
 
 amr_pca$layers
+```
+
+```
+## [[1]]
+## geom_point: na.rm = TRUE
+## stat_identity: na.rm = TRUE
+## position_identity
+```
+
+``` r
 amr_pca$layers <- amr_pca$layers[-1]
 
 amr_pca_final <- amr_pca +
@@ -546,16 +796,57 @@ amr_pca_final <- amr_pca +
 # PERMANOVA for amoxicillin treatments
 set.seed(10)
 adonis2(formula = ps.amr.bl.euc_diss ~ Estimated_Num_treatments_Per_sq_m, data = ps.amr.bl.clr_meta, permutations = 999) 
+```
 
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.amr.bl.euc_diss ~ Estimated_Num_treatments_Per_sq_m, data = ps.amr.bl.clr_meta, permutations = 999)
+##          Df SumOfSqs      R2      F Pr(>F)
+## Model     1    53889 0.02598 1.0403  0.354
+## Residual 39  2020336 0.97402              
+## Total    40  2074226 1.00000
+```
+
+``` r
 set.seed(10)
 adonis2(formula = ps.amr.bl.euc_diss ~ Number_treatments_PreSampling, data = ps.amr.bl.clr_meta, permutations = 999) 
+```
 
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.amr.bl.euc_diss ~ Number_treatments_PreSampling, data = ps.amr.bl.clr_meta, permutations = 999)
+##          Df SumOfSqs      R2      F Pr(>F)
+## Model     1    37378 0.01802 0.7157  0.771
+## Residual 39  2036847 0.98198              
+## Total    40  2074226 1.00000
+```
+
+``` r
 set.seed(10)
 adonis2(formula = ps.amr.bl.euc_diss ~ Treatment_History, data = ps.amr.bl.clr_meta, permutations = 999) 
 ```
 
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.amr.bl.euc_diss ~ Treatment_History, data = ps.amr.bl.clr_meta, permutations = 999)
+##          Df SumOfSqs      R2      F Pr(>F)
+## Model     2   134507 0.06485 1.3175  0.135
+## Residual 38  1939719 0.93515              
+## Total    40  2074226 1.00000
+```
+
 What if I only subset corals that had any history of treatment? Remove all corals that were not treated at ALL over the course of the study?
-```{r}
+
+``` r
 # Subset to only corals with any treatment history
 ps.amr.bl.treated <- subset_samples(ps.amr.bl, Recent_Treatment_Less_than_two_months != "NoTreatments")
 
@@ -578,12 +869,52 @@ sample_data(ps.amr.bl.treated_clr)$Recent_Treatment_Less_than_two_months <- fact
 # PERMANOVA for amoxicillin treatments
 set.seed(10)
 adonis2(formula = ps.amr.bl.treated.euc_diss ~ Estimated_Num_treatments_Per_sq_m, data = ps.amr.bl.treated.clr_meta, permutations = 999) 
+```
 
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.amr.bl.treated.euc_diss ~ Estimated_Num_treatments_Per_sq_m, data = ps.amr.bl.treated.clr_meta, permutations = 999)
+##          Df SumOfSqs      R2      F Pr(>F)
+## Model     1    51791 0.03398 0.8794  0.527
+## Residual 25  1472358 0.96602              
+## Total    26  1524149 1.00000
+```
+
+``` r
 set.seed(10)
 adonis2(formula = ps.amr.bl.treated.euc_diss ~ Number_treatments_PreSampling, data = ps.amr.bl.treated.clr_meta, permutations = 999) 
+```
 
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.amr.bl.treated.euc_diss ~ Number_treatments_PreSampling, data = ps.amr.bl.treated.clr_meta, permutations = 999)
+##          Df SumOfSqs      R2      F Pr(>F)
+## Model     1    46226 0.03033 0.7819  0.656
+## Residual 25  1477923 0.96967              
+## Total    26  1524149 1.00000
+```
+
+``` r
 set.seed(10)
 adonis2(formula = ps.amr.bl.treated.euc_diss ~ Recent_Treatment_Less_than_two_months, data = ps.amr.bl.treated.clr_meta, permutations = 999) 
+```
+
+```
+## Permutation test for adonis under reduced model
+## Permutation: free
+## Number of permutations: 999
+## 
+## adonis2(formula = ps.amr.bl.treated.euc_diss ~ Recent_Treatment_Less_than_two_months, data = ps.amr.bl.treated.clr_meta, permutations = 999)
+##          Df SumOfSqs     R2      F Pr(>F)
+## Model     1    36725 0.0241 0.6173   0.88
+## Residual 25  1487424 0.9759              
+## Total    26  1524149 1.0000
 ```
 Continued negative results. 
 
@@ -592,14 +923,23 @@ Continued negative results.
 
 Diverse beta-lactamase genes exist within the coral microbiome regardless of application of the antibiotic amoxicillin. a) The estimated richness (breakaway) of the beta-lactamase genes in each sample did not significantly increase with amoxicillin treatments or recent amoxicillin application (betta test p > 0.05 for total number of amoxicillin treatments (continuous), total number of amoxicillin treatments scaled per m2 of live tissue area (continuous), and treatment history (categorical)). The line represents a linear regression. n.s. = not significant from the betta test for heterogeneity of total diversity. b) Principal component analysis showing the beta diversity of beta-lactamase genes in the coral microbiome did not differ due to number of treatments (raw and scaled to tissue area) or recent treatment application (PERMANOVA, p > 0.05). Points in a) and b) are shaped based on the colony fate and colored based on treatment history. c) Taxonomic affiliation of the 53,467 individual beta-lactamase genes depicted as a pie chart indicated most were unclassified (NA), and a small proportion were annotated at the class taxonomic level. The top nine most abundant classes are shown, and the “Other Class” includes the remaining 94 classes. 
 
-```{r mainARG}
+
+``` r
 #ggarrange(ggarrange(ggarrange(treatments, richness, ncol = 2, common.legend = TRUE, labels = c("a.", "b."), legend = "bottom"), 
 #          betalactam.tax, widths = c(1.5, 1), labels = c("", "c.")), 
 #          blactams, nrow = 2, labels = c("", "d."))
 
 wrap_plots(wrap_plots(richness, amr_pca_final, guides = "collect", widths = c(1,1.5)),
            wrap_plots(betalactam.tax), nrow = 2, heights = c(1,1.3), axis_titles = "collect")
+```
 
+```
+## `geom_smooth()` using formula = 'y ~ x'
+```
+
+<img src="../figures/fig-ARGmainARG-1.png" width="672" />
+
+``` r
 #ggsave("../figures/AMR_beta-lactamase_all_10.16.25.pdf", width = 12, height = 8)
 ```
 
